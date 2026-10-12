@@ -1,0 +1,24 @@
+{
+  "domain": "irrigation_sequencer",
+  "name": "Irrigation Sequencer",
+  "after_dependencies": [
+    "frontend",
+    "http",
+    "lovelace",
+    "mobile_app",
+    "panel_custom",
+    "weather",
+    "websocket_api"
+  ],
+  "codeowners": [
+    "@arrence-1"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/arrence-1/irrigation_Scheduler",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/arrence-1/irrigation_Scheduler/issues",
+  "requirements": [],
+  "version": "1.3.1"
+}

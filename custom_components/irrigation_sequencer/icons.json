@@ -1,0 +1,36 @@
+{
+  "entity": {
+    "switch": {
+      "master": { "default": "mdi:sprinkler-variant", "state": { "off": "mdi:water-off" } },
+      "cycle": { "default": "mdi:calendar-clock", "state": { "off": "mdi:calendar-remove" } }
+    },
+    "number": {
+      "seasonal_adjustment": { "default": "mdi:sun-thermometer" }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:sprinkler",
+        "state": {
+          "idle": "mdi:sprinkler",
+          "watering": "mdi:sprinkler-variant",
+          "gap": "mdi:timer-sand",
+          "soaking": "mdi:water-sync",
+          "waiting": "mdi:account-clock",
+          "held": "mdi:pause-circle",
+          "manual": "mdi:hand-water",
+          "stuck": "mdi:alert-octagon"
+        }
+      },
+      "next_cycle": { "default": "mdi:calendar-arrow-right" }
+    },
+    "binary_sensor": {
+      "tap_blocked": { "default": "mdi:account-off", "state": { "on": "mdi:account-alert" } }
+    }
+  },
+  "services": {
+    "run_cycle": { "service": "mdi:play-circle" },
+    "stop": { "service": "mdi:stop-circle" },
+    "skip_tap": { "service": "mdi:skip-next" },
+    "run_tap": { "service": "mdi:hand-water" }
+  }
+}

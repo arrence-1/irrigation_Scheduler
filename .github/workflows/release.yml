@@ -1,0 +1,40 @@
+# Push a version tag (v1.3.2) and this publishes the GitHub release that HACS offers as an update:
+# it checks the version strings and the CHANGELOG entry, runs the tests, and attaches a zip for manual installs.
+# A release you create by hand on GitHub (Releases > Draft a new release) also gets the zip attached.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - name: Versions match the tag and the CHANGELOG has an entry
+        run: python tools/release_check.py "$GITHUB_REF_NAME" > notes.md
+      - run: pip install -r requirements_test.txt
+      - name: Tests
+        run: pytest -q
+      - name: Zip for manual installs (unzip into /config/custom_components/)
+        run: cd custom_components && zip -r -X "$GITHUB_WORKSPACE/irrigation_sequencer.zip" irrigation_sequencer -x "*/__pycache__/*"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" irrigation_sequencer.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" irrigation_sequencer.zip --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file notes.md
+          fi

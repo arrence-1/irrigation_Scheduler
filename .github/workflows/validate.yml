@@ -1,0 +1,51 @@
+# Home Assistant's own checker (hassfest: manifest, translations, services, icons, config flow) and the HACS
+# checks, on every change and once a week (Home Assistant adds rules over time).
+name: Validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "7 21 * * 0" # Monday 08:07 Sydney (summer time)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: Home Assistant (hassfest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # No licence file (all rights reserved) and no topics: both only matter for the HACS default list.
+          # Remove a word here once you add a LICENSE file or repository topics.
+          ignore: license topics
+
+  report:
+    name: Open an issue when the scheduled check fails
+    needs: [hassfest, hacs]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled check failed: Home Assistant or HACS rules changed"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          body="@$OWNER the scheduled hassfest / HACS check failed: $RUN"
+          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$title" --body "$body"; fi

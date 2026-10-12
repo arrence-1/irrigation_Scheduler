@@ -1,0 +1,62 @@
+run_cycle:
+  fields:
+    cycle:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 12
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer
+stop:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer
+skip_tap:
+  fields:
+    tap:
+      required: true
+      example: 2
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer
+run_tap:
+  fields:
+    tap:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    minutes:
+      required: false
+      example: 5
+      selector:
+        number:
+          min: 0.5
+          max: 240
+          step: 0.5
+          unit_of_measurement: min
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer

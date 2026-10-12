@@ -1,0 +1,4 @@
+# The Home Assistant version the current release is tested on (CI job "Tested version").
+# pytest-homeassistant-custom-component 0.13.372 = Home Assistant 2026.10.1. Bump it together with a release.
+pytest-homeassistant-custom-component==0.13.372
+ruff==0.17.0

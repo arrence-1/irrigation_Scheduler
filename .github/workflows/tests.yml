@@ -1,0 +1,79 @@
+# The tests (96, real Home Assistant core, pretend valves) on every change, and twice a week against the
+# newest Home Assistant release, so a Home Assistant update that would break the integration shows up here
+# (as a GitHub issue that notifies you) instead of in the garden.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "37 21 * * 0,3" # Monday and Thursday 08:37 Sydney (summer time; 07:37 in winter)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tested:
+    name: Tested Home Assistant (requirements_test.txt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - run: pip install -r requirements_test.txt
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+
+  newest:
+    name: Newest Home Assistant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install the newest Home Assistant test harness
+        run: |
+          pip install --upgrade pytest-homeassistant-custom-component
+          python - <<'EOF'
+          import json, os, sys, urllib.request
+          from importlib.metadata import version
+          import homeassistant.const as c
+          info = json.load(urllib.request.urlopen("https://pypi.org/pypi/pytest-homeassistant-custom-component/json"))["info"]
+          have = version("pytest-homeassistant-custom-component")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(f"Tested against Home Assistant **{c.__version__}** (test harness {have})\n")
+          if have != info["version"]:
+              sys.exit(f"The newest Home Assistant test harness ({info['version']}) needs Python "
+                       f"{info['requires_python']}: change python-version in .github/workflows/tests.yml")
+          EOF
+      - name: Tests
+        run: pytest -q
+
+  report:
+    name: Open an issue when the scheduled test fails
+    needs: [tested, newest]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled test failed: a Home Assistant update may break Irrigation Sequencer"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          body="@$OWNER the scheduled test failed: $RUN
+
+          Before updating Home Assistant, open the run, look at the failing test and fix it (or ask for a fix).
+          Until then, hold back the Home Assistant update; see docs/updating.md."
+          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
