@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "irrigation_sequencer"
 NAME = "Irrigation Sequencer"
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.SENSOR, Platform.BINARY_SENSOR]
 

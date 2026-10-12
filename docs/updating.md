@@ -6,18 +6,18 @@
 change the code ─▶ tools/bump_version.py 1.3.2 + CHANGELOG ─▶ commit, push to main
       ─▶ Actions > Release > Run workflow (or a v1.3.2 tag)
       ─▶ GitHub Actions: checks the versions, runs the tests, publishes the release (with a zip)
-      ─▶ HACS sees the release ─▶ Settings > Updates > Irrigation Sequencer > Install ─▶ restart Home Assistant
+      ─▶ HACS sees the release ─▶ Settings > Updates > Irrigation Scheduler > Install ─▶ restart Home Assistant
 ```
 
 Code on `main` that is not released yet never reaches Home Assistant: HACS installs releases.
 
 HACS looks at GitHub for a custom repository when Home Assistant starts and then every 48 hours. To look now:
-HACS > Irrigation Sequencer > ⋮ > *Update information*.
+HACS > Irrigation Scheduler > ⋮ > *Update information*.
 
 Restart when nothing is watering (the status says *Idle*). A restart mid-run is handled (the tap stays on and
 closes on time, "Recovered after restart"), but idle is tidier.
 
-**Going back a version:** HACS > Irrigation Sequencer > ⋮ > *Redownload* > *Need a different version?* > pick the
+**Going back a version:** HACS > Irrigation Scheduler > ⋮ > *Redownload* > *Need a different version?* > pick the
 older one > restart. The settings are not touched.
 
 ## Making a release

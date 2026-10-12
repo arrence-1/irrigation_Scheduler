@@ -5,7 +5,7 @@
  * Live status, master switch, seasonal %, run / stop buttons.
  * Served by the irrigation_sequencer integration (no build step, no dependencies).
  */
-const CARD_VERSION = "1.3.1";
+const CARD_VERSION = "1.3.2";
 const DOMAIN = "irrigation_sequencer";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_SHORT = ["M", "T", "W", "T", "F", "S", "S"];

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2 (13 Oct 2026) — called Irrigation Scheduler in HACS
+
+* HACS lists it as **Irrigation Scheduler** (`hacs.json`). Nothing else changes: the integration, its entities,
+  settings and card are the same, and Home Assistant still calls it Irrigation Sequencer
+  (domain `irrigation_sequencer`).
+
 ## 1.3.1 (12 Oct 2026) — on GitHub, installed and updated through HACS
 
 * **No change to how it waters, the card or the settings.** This release packages it for GitHub and HACS.

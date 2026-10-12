@@ -9,7 +9,7 @@ Once per Home Assistant:
 2. Repository: `https://github.com/arrence-1/irrigation_Scheduler`, Type: **Integration** > **Add**.
 
 Then:
-3. Find **Irrigation Sequencer** in HACS > **Download** > the newest version.
+3. Find **Irrigation Scheduler** in HACS (that is its name there) > **Download** > the newest version.
 4. **Restart** Home Assistant (Settings > System > ⋮ > Restart Home Assistant, or the repair HACS shows).
 
 From then on, a new version appears under **Settings > Updates** like any other update ([Updating](updating.md)).
@@ -62,4 +62,4 @@ IDs (they do when the Zigbee / Wi-Fi devices came across with the backup) and lo
 1. Turn the master switch off and make sure no valve is open.
 2. Settings > Devices & services > Irrigation Sequencer > delete each entry. The last one also removes the card
    resource and the Irrigation page.
-3. HACS > Irrigation Sequencer > ⋮ > **Remove**, then restart. Remove the card from your dashboards.
+3. HACS > Irrigation Scheduler > ⋮ > **Remove**, then restart. Remove the card from your dashboards.

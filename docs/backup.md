@@ -30,7 +30,7 @@ extra to set up for this integration.
 * **Whole machine lost or replaced:** set up Home Assistant, choose *Restore from backup*.
 * **Something went wrong after a change:** restore a backup from before it (Settings > System > Backups > the
   backup > *Restore*). A restore puts back the whole `/config` folder, not just this integration.
-* **Only the integration's code** (an update misbehaves): no backup needed. HACS > Irrigation Sequencer > ⋮ >
+* **Only the integration's code** (an update misbehaves): no backup needed. HACS > Irrigation Scheduler > ⋮ >
   *Redownload* > *Need a different version?* > the previous one > restart. Settings stay as they are.
 * **Only the settings:** they can be read from a backup or from a *Download diagnostics* file
   (Settings > Devices & services > Irrigation Sequencer > ⋮), and entered again on the Irrigation page.

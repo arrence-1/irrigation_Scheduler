@@ -29,7 +29,7 @@ Tested: 96 automated tests against a real Home Assistant core, plus live UI test
 **HACS (recommended)**
 1. HACS > ⋮ (top right) > *Custom repositories* > Repository `https://github.com/arrence-1/irrigation_Scheduler`,
    Type **Integration** > *Add*.
-2. Open **Irrigation Sequencer** in HACS > *Download* (the newest version).
+2. Open **Irrigation Scheduler** (its name in HACS) > *Download* (the newest version).
 3. Restart Home Assistant. New versions then show up under *Settings > Updates* like any other update.
 
 **By hand:** download `irrigation_sequencer.zip` from the newest
