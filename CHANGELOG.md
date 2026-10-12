@@ -9,7 +9,8 @@
   ("Detected that custom integration … will stop working in …"). Home Assistant gives these warnings months
   ahead, so the weekly test against the newest Home Assistant flags a coming break long before it happens.
 * GitHub Actions: Home Assistant's *hassfest* and the HACS checks; the tests on every change and every Monday
-  against the newest Home Assistant; a release built from a version tag, with a zip for manual installs.
+  against the newest Home Assistant; releases published with *Actions > Release > Run workflow* (or a version
+  tag), with a zip for manual installs.
 * New tools: `tools/bump_version.py` (set the version everywhere), `tools/release_check.py` (versions match,
   release notes from this file), `tools/set_repo.py` (point the links at your repository).
 * New notes in `docs/`: how it works and where everything is kept, install (also on another machine),

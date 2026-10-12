@@ -3,10 +3,13 @@
 ## How a new version gets to Home Assistant
 
 ```
-change the code ─▶ tools/bump_version.py 1.3.2 + CHANGELOG ─▶ commit, push ─▶ tag v1.3.2
+change the code ─▶ tools/bump_version.py 1.3.2 + CHANGELOG ─▶ commit, push to main
+      ─▶ Actions > Release > Run workflow (or a v1.3.2 tag)
       ─▶ GitHub Actions: checks the versions, runs the tests, publishes the release (with a zip)
       ─▶ HACS sees the release ─▶ Settings > Updates > Irrigation Sequencer > Install ─▶ restart Home Assistant
 ```
+
+Code on `main` that is not released yet never reaches Home Assistant: HACS installs releases.
 
 HACS looks at GitHub for a custom repository when Home Assistant starts and then every 48 hours. To look now:
 HACS > Irrigation Sequencer > ⋮ > *Update information*.
@@ -20,15 +23,17 @@ older one > restart. The settings are not touched.
 ## Making a release
 
 **Asking Claude** (with GitHub connected to Claude): describe the change. Claude changes the code, runs the
-tests, bumps the version, writes the CHANGELOG entry, pushes and tags; the release workflow publishes it.
+tests, sets the version, writes the CHANGELOG entry and pushes it to `main`. Then **you** publish it: on GitHub,
+*Actions > Release > Run workflow > Run workflow* (leave the box empty). Claude's session can push code but can't
+create tags, so nothing reaches Home Assistant until you press that button.
 
 **By hand on github.com:**
 1. Change the files (the pencil icon on a file, then *Commit changes*). Change the version in
    `custom_components/irrigation_sequencer/manifest.json`, `const.py` (`VERSION`) and
    `frontend/irrigation-sequencer-card.js` (`CARD_VERSION`): all three the same. Add a `## 1.3.2 (date)` entry at
    the top of `CHANGELOG.md`.
-2. *Releases > Draft a new release > Choose a tag* > type `v1.3.2` > *Create new tag* > *Generate release
-   notes* (or paste the CHANGELOG entry) > *Publish release*. The release workflow adds the zip.
+2. *Actions > Release > Run workflow*. (Or *Releases > Draft a new release*, tag `v1.3.2`, *Publish release*: the
+   release workflow then adds the zip.)
 
 **On a computer with git:**
 ```bash
@@ -36,7 +41,7 @@ python tools/bump_version.py 1.3.2      # sets all three version strings, starts
 # write the CHANGELOG entry, then:
 python tools/release_check.py 1.3.2     # versions match, entry not empty
 pytest -q && ruff check .
-git commit -am "Release 1.3.2" && git tag v1.3.2 && git push && git push --tags
+git commit -am "Release 1.3.2" && git tag v1.3.2 && git push && git push --tags   # the tag starts the release
 ```
 
 A release workflow that fails (versions differ, empty CHANGELOG entry, a failing test) publishes nothing, so HACS

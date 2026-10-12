@@ -212,4 +212,4 @@ pytest -q && ruff check .
 ```
 
 `tools/gen_translations.py` regenerates `translations/en.json`. Releasing a new version (`tools/bump_version.py`,
-CHANGELOG, a `v1.x.y` tag): see [Updating](docs/updating.md).
+CHANGELOG, then *Actions > Release > Run workflow*): see [Updating](docs/updating.md).
