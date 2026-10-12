@@ -1,4 +1,4 @@
-"""Irrigation Sequencer engine.
+"""Irrigation Scheduler engine.
 
 One routine, :func:`reconcile`, makes every decision. The coordinator builds
 a :class:`Snapshot` of the world (clock, valve states, sensors), calls

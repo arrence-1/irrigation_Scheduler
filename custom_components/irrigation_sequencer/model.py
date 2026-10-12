@@ -1,4 +1,4 @@
-"""Configuration model for Irrigation Sequencer.
+"""Configuration model for Irrigation Scheduler.
 
 Plain Python (no Home Assistant imports) so the engine and its simulator
 tests can use it directly. The config entry's ``options`` dict is the

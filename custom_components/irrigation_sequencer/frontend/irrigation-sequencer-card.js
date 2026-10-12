@@ -1,11 +1,11 @@
 /*
- * Irrigation Sequencer card
+ * Irrigation Scheduler card
  * A taps x cycles grid: each cell = minutes / run order / soak, "Off" cells greyed.
  * Tap a cell to edit it, tap a cycle header to edit its time and days.
  * Live status, master switch, seasonal %, run / stop buttons.
  * Served by the irrigation_sequencer integration (no build step, no dependencies).
  */
-const CARD_VERSION = "1.3.2";
+const CARD_VERSION = "1.3.3";
 const DOMAIN = "irrigation_sequencer";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_SHORT = ["M", "T", "W", "T", "F", "S", "S"];
@@ -57,7 +57,7 @@ const daysText = (days) => {
   return days.map((d) => d.slice(0, 2)).map((d) => d[0].toUpperCase() + d[1]).join(" ");
 };
 
-class IrrigationSequencerCard extends HTMLElement {
+class IrrigationSchedulerCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -106,7 +106,7 @@ class IrrigationSequencerCard extends HTMLElement {
       if (this._config && this._config.entry_id) msg.entry_id = this._config.entry_id;
       const res = await this._hass.callWS(msg);
       this._cfg = res.entries[0] || null;
-      this._error = this._cfg ? "" : "Irrigation Sequencer is not set up (or not loaded).";
+      this._error = this._cfg ? "" : "Irrigation Scheduler is not set up (or not loaded).";
     } catch (e) {
       this._error = `Could not load: ${e.message || e}`;
     }
@@ -750,14 +750,14 @@ const CSS = `
   .err { margin-top: 8px; font-size: .85em; color: var(--error-color, #db4437); }
 `;
 
-class IrrigationSequencerCardEditor extends HTMLElement {
+class IrrigationSchedulerCardEditor extends HTMLElement {
   setConfig(config) { this._config = config; this._render(); }
   set hass(hass) { this._hass = hass; this._render(); }
   _render() {
     if (!this._hass || !this._config) return;
     if (!this._form) {
       this._form = document.createElement("ha-form");
-      this._form.computeLabel = (s) => ({ title: "Title", entry_id: "Irrigation Sequencer (only if you have more than one)" }[s.name]);
+      this._form.computeLabel = (s) => ({ title: "Title", entry_id: "Irrigation Scheduler (only if you have more than one)" }[s.name]);
       this._form.addEventListener("value-changed", (ev) => {
         const cfg = { ...this._config, ...ev.detail.value };
         Object.keys(cfg).forEach((k) => (cfg[k] === "" || cfg[k] === undefined) && delete cfg[k]);
@@ -779,7 +779,7 @@ class IrrigationSequencerCardEditor extends HTMLElement {
 // Every setting of the Configure screens, on the card (⚙) and on the Irrigation page in the sidebar.
 // Labels and help texts come from the integration's own translations, so both places read the same.
 const PANEL_PATH = "/irrigation-sequencer";
-const PAGE_CHOICE = `${DOMAIN}_page_choice`; // the Irrigation Sequencer last picked on the page (this browser)
+const PAGE_CHOICE = `${DOMAIN}_page_choice`; // the Irrigation Scheduler last picked on the page (this browser)
 const S = {
   num: (min, max, step = 1, unit) => ({ number: { min, max, step, mode: "box", ...(unit ? { unit_of_measurement: unit } : {}) } }),
   ent: (domain, multiple = false) => ({ entity: { filter: { domain }, ...(multiple ? { multiple: true } : {}) } }),
@@ -867,7 +867,7 @@ const navigate = (path) => {
   window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
 };
 
-class IrrigationSequencerSettings extends HTMLElement {
+class IrrigationSchedulerSettings extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -982,7 +982,7 @@ class IrrigationSequencerSettings extends HTMLElement {
   _render() {
     this._frame();
     const s = this._s;
-    // which Irrigation Sequencer these settings belong to (there can be several, e.g. a test one)
+    // which Irrigation Scheduler these settings belong to (there can be several, e.g. a test one)
     this._head.innerHTML = `<span class="h">Settings${s && s.title ? ` <span class="who">· ${esc(s.title)}</span>` : ""}</span>`
       + (this.pageLink ? `<a href="${PANEL_PATH}" data-a="page">Open the Irrigation page</a>` : "");
     if (!s || !this._ready) {
@@ -1188,7 +1188,7 @@ const SETTINGS_CSS = `
 `;
 
 // ------------------------------------------------------------------ the Irrigation page (sidebar)
-class IrrigationSequencerPanel extends HTMLElement {
+class IrrigationSchedulerPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -1215,11 +1215,11 @@ class IrrigationSequencerPanel extends HTMLElement {
   _build() {
     this.shadowRoot.innerHTML = `<style>${PANEL_CSS}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><div class="title">Irrigation</div></div>
-      <div class="content"><div class="entries" role="tablist" aria-label="Irrigation Sequencer"></div>
+      <div class="content"><div class="entries" role="tablist" aria-label="Irrigation Scheduler"></div>
         <div class="grid"></div><ha-card class="box" hidden></ha-card></div>`;
     this._menu = this.shadowRoot.querySelector("ha-menu-button");
     this._menu.narrow = this._narrow;
-    // several Irrigation Sequencers (e.g. a test one): one button each, the one shown is highlighted
+    // several Irrigation Schedulers (e.g. a test one): one button each, the one shown is highlighted
     this._pick = this.shadowRoot.querySelector(".entries");
     this._pick.addEventListener("click", (ev) => {
       const b = ev.target.closest("button[data-id]");
@@ -1253,7 +1253,7 @@ class IrrigationSequencerPanel extends HTMLElement {
     this._pick.innerHTML = this._entries.length > 1 ? this._entries.map((e) => `<button role="tab"
       data-id="${e.entry_id}" class="${e.entry_id === id ? "on" : ""}" aria-selected="${e.entry_id === id}">${esc(e.title)}</button>`).join("") : "";
     if (!id) {
-      grid.innerHTML = `<ha-card><div class="empty">Irrigation Sequencer is not set up (or not loaded). Add it under Settings → Devices &amp; services.</div></ha-card>`;
+      grid.innerHTML = `<ha-card><div class="empty">Irrigation Scheduler is not set up (or not loaded). Add it under Settings → Devices &amp; services.</div></ha-card>`;
       box.hidden = true;
       return;
     }
@@ -1297,12 +1297,12 @@ const PANEL_CSS = `
 `;
 
 if (!customElements.get("irrigation-sequencer-card")) {
-  customElements.define("irrigation-sequencer-card", IrrigationSequencerCard);
-  customElements.define("irrigation-sequencer-card-editor", IrrigationSequencerCardEditor);
+  customElements.define("irrigation-sequencer-card", IrrigationSchedulerCard);
+  customElements.define("irrigation-sequencer-card-editor", IrrigationSchedulerCardEditor);
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "irrigation-sequencer-card",
-    name: "Irrigation Sequencer",
+    name: "Irrigation Scheduler",
     description: "Taps x cycles grid with live status; tap a cell to edit minutes, run order and soak.",
     preview: false,
     documentationURL: "https://github.com/arrence-1/irrigation_Scheduler",
@@ -1312,11 +1312,11 @@ if (!customElements.get("irrigation-sequencer-card")) {
       return { config: { type: "custom:irrigation-sequencer-card" } };
     },
   });
-  console.info(`%c IRRIGATION-SEQUENCER-CARD %c v${CARD_VERSION} `, "background:#039be5;color:#fff", "");
+  console.info(`%c IRRIGATION-SCHEDULER-CARD %c v${CARD_VERSION} `, "background:#039be5;color:#fff", "");
 }
 if (!customElements.get("irrigation-sequencer-settings")) {
-  customElements.define("irrigation-sequencer-settings", IrrigationSequencerSettings);
+  customElements.define("irrigation-sequencer-settings", IrrigationSchedulerSettings);
 }
 if (!customElements.get("irrigation-sequencer-panel")) {
-  customElements.define("irrigation-sequencer-panel", IrrigationSequencerPanel);
+  customElements.define("irrigation-sequencer-panel", IrrigationSchedulerPanel);
 }

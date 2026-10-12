@@ -1,4 +1,4 @@
-"""Base entity for Irrigation Sequencer."""
+"""Base entity for Irrigation Scheduler."""
 
 from __future__ import annotations
 

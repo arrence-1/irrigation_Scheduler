@@ -105,7 +105,7 @@ class IrrigationCoordinator:
             identifiers={(DOMAIN, self.entry.entry_id)},
             name=self.entry.title,
             manufacturer=NAME,
-            model="Sequencer",
+            model="Scheduler",
             sw_version=VERSION,
             entry_type=DeviceEntryType.SERVICE,
         )
@@ -289,7 +289,7 @@ class IrrigationCoordinator:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                _LOGGER.exception("Irrigation Sequencer: reconcile failed (reasons %s)", reasons)
+                _LOGGER.exception("Irrigation Scheduler: reconcile failed (reasons %s)", reasons)
                 self._schedule(time.time() + 30)
             if not self._wake.is_set():
                 self._idle.set()

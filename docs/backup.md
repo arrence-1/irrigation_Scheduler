@@ -33,7 +33,7 @@ extra to set up for this integration.
 * **Only the integration's code** (an update misbehaves): no backup needed. HACS > Irrigation Scheduler > ⋮ >
   *Redownload* > *Need a different version?* > the previous one > restart. Settings stay as they are.
 * **Only the settings:** they can be read from a backup or from a *Download diagnostics* file
-  (Settings > Devices & services > Irrigation Sequencer > ⋮), and entered again on the Irrigation page.
+  (Settings > Devices & services > Irrigation Scheduler > ⋮), and entered again on the Irrigation page.
 
 Don't copy files out of `.storage` while Home Assistant is running, and don't put them back by hand: use a
 backup restore.

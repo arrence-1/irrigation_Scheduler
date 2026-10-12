@@ -1,4 +1,4 @@
-# Irrigation Sequencer
+# Irrigation Scheduler
 
 A Home Assistant custom integration that waters a garden **one tap (valve) at a time**, in a set order, over
 several scheduled **cycles** a day, and recovers safely from manual use, restarts and outages. It has its own
@@ -36,11 +36,11 @@ Tested: 96 automated tests against a real Home Assistant core, plus live UI test
 [release](https://github.com/arrence-1/irrigation_Scheduler/releases), unzip it into `/config/custom_components/`
 (you should end up with `/config/custom_components/irrigation_sequencer/manifest.json`) and restart.
 
-**Add it:** Settings > Devices & services > *Add integration* > **Irrigation Sequencer**
+**Add it:** Settings > Devices & services > *Add integration* > **Irrigation Scheduler**
 1. Name (`Irrigation` gives `switch.irrigation_master` …), number of taps (6) and cycles (4).
 2. Pick a valve per tap (Toggle helpers for a first test). Tap names come from the valve names; rename them on the
    Irrigation page (*Taps*).
-3. Add the card to a dashboard: *Edit dashboard > Add card >* search **Irrigation Sequencer** (or YAML
+3. Add the card to a dashboard: *Edit dashboard > Add card >* search **Irrigation Scheduler** (or YAML
    `type: custom:irrigation-sequencer-card`). The integration registers the card as a dashboard resource itself; if
    your dashboard resources are in YAML mode, add `/irrigation_sequencer_static/irrigation-sequencer-card.js`
    (type `module`) to them.
@@ -109,13 +109,13 @@ Notifications, Cycle-and-soak, People guard, Rain & weather, Number of taps & cy
 limits as the Configure screens. Changes save by themselves: a switch or a picker at once, a box you type in when
 you pause or leave it ("All changes saved" at the bottom). Only *Taps & cycles* has a Save button, because a new
 number of taps or cycles reloads the app. With more
-than one Irrigation Sequencer (a test one, say), a button for each sits at the top: the highlighted one is shown,
+than one Irrigation Scheduler (a test one, say), a button for each sits at the top: the highlighted one is shown,
 and the settings heading names it too ("Settings · Irrigation"). The page remembers the one you pick last.
 
 ![The Irrigation page](docs/screenshots/20-page-taps.png)
 
 ### Settings (Configure)
-The same settings are still under *Settings > Devices & services > Irrigation Sequencer > Configure*.
+The same settings are still under *Settings > Devices & services > Irrigation Scheduler > Configure*.
 One screen per group: **Cycles** (time, days, and per tap minutes / run order / soak, each tap in its own box),
 **Taps** (valve, name, people sensors, soil sensor + "wet enough at", bypass switch), **General** (gap 5 s,
 confirm timeout 30 s, safety limit 20 min, running-late 30 min, optional seasonal % entity), **Notifications**,

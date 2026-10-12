@@ -1,4 +1,4 @@
-"""Diagnostics download (Settings > Devices & services > Irrigation Sequencer > ... > Download diagnostics)."""
+"""Diagnostics download (Settings > Devices & services > Irrigation Scheduler > ... > Download diagnostics)."""
 
 from __future__ import annotations
 

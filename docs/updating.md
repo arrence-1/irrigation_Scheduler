@@ -57,7 +57,7 @@ after. Each can change things custom integrations use.
 | Part | Uses | If a Home Assistant update breaks it |
 |---|---|---|
 | Watering (engine, coordinator, entities, actions) | the standard, documented integration parts: entries, entities, events, timers, storage | Home Assistant warns **months ahead** in its log ("custom integration 'irrigation_sequencer' … will stop working in …"). The scheduled tests fail on that warning and open a GitHub issue, so it gets fixed before the update that removes it. |
-| The card, its settings and the Irrigation page | Home Assistant's frontend: its form fields, dashboard resources, sidebar pages | Frontend changes come with less warning (2026.8 changed how cards load; fixed in 1.0.0). **Watering carries on**; only the screen is affected. Use Settings > Devices & services > Irrigation Sequencer > *Configure* meanwhile. |
+| The card, its settings and the Irrigation page | Home Assistant's frontend: its form fields, dashboard resources, sidebar pages | Frontend changes come with less warning (2026.8 changed how cards load; fixed in 1.0.0). **Watering carries on**; only the screen is affected. Use Settings > Devices & services > Irrigation Scheduler > *Configure* meanwhile. |
 | Hassfest / HACS rules | manifest, translations, services | The weekly *Validate* check fails and opens an issue. Nothing changes in your garden. |
 
 **What protects the garden if the integration doesn't load at all:** nothing schedules and nothing closes a tap

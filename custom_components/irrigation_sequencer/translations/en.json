@@ -1,9 +1,9 @@
 {
-  "title": "Irrigation Sequencer",
+  "title": "Irrigation Scheduler",
   "config": {
     "step": {
       "user": {
-        "title": "Irrigation Sequencer",
+        "title": "Irrigation Scheduler",
         "description": "Waters your garden one tap at a time over scheduled cycles. Choose how many taps (valves) and cycles you need; both can be changed later.",
         "data": {
           "name": "Name",
@@ -47,7 +47,7 @@
     },
     "step": {
       "init": {
-        "title": "Irrigation Sequencer settings",
+        "title": "Irrigation Scheduler settings",
         "description": "Pick what to change. Each screen saves when you press Submit. Minutes, run order and soak can also be edited on the dashboard card.",
         "menu_options": {
           "cycle_pick": "Cycles: time, days, minutes, run order, soak",

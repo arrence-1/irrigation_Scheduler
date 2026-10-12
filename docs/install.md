@@ -30,14 +30,14 @@ through HACS.
 
 ## Add it
 
-**Settings > Devices & services > Add integration > Irrigation Sequencer**
+**Settings > Devices & services > Add integration > Irrigation Scheduler**
 1. A name (`Irrigation` gives `switch.irrigation_master`, `sensor.irrigation_status`, …), the number of taps and
    cycles (you can change both later).
 2. A valve for each tap: any `switch`, `valve` or `input_boolean`. For a first test use Toggle helpers (pretend
    valves).
 3. Set minutes on the **Irrigation** page in the sidebar or on the card, then turn the **master switch** on.
 
-The card: *Edit dashboard > Add card >* **Irrigation Sequencer**. The integration adds the card to the dashboard
+The card: *Edit dashboard > Add card >* **Irrigation Scheduler**. The integration adds the card to the dashboard
 resources by itself.
 
 **Only one thing may drive the valves.** Before you give it the real valves, disable any other automation or
@@ -55,11 +55,11 @@ IDs (they do when the Zigbee / Wi-Fi devices came across with the backup) and lo
 1. Install it with HACS (above), restart, *Add integration*.
 2. Pick that machine's valves and set the cycles. Settings don't travel on their own: copy them from the other
    machine's Irrigation page, or from its **Download diagnostics** file (Settings > Devices & services >
-   Irrigation Sequencer > ⋮ > Download diagnostics, the `options` part), or ask Claude to copy them across.
+   Irrigation Scheduler > ⋮ > Download diagnostics, the `options` part), or ask Claude to copy them across.
 
 ## Remove it
 
 1. Turn the master switch off and make sure no valve is open.
-2. Settings > Devices & services > Irrigation Sequencer > delete each entry. The last one also removes the card
+2. Settings > Devices & services > Irrigation Scheduler > delete each entry. The last one also removes the card
    resource and the Irrigation page.
 3. HACS > Irrigation Scheduler > ⋮ > **Remove**, then restart. Remove the card from your dashboards.

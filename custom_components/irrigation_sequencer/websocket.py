@@ -95,7 +95,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
 def _entry(hass: HomeAssistant, connection, msg: dict[str, Any]):
     entries = [e for e in _loaded(hass) if e.entry_id == msg["entry_id"]]
     if not entries:
-        connection.send_error(msg["id"], "not_found", "Irrigation Sequencer entry not loaded")
+        connection.send_error(msg["id"], "not_found", "Irrigation Scheduler entry not loaded")
         return None
     return entries[0]
 
@@ -188,7 +188,7 @@ def ws_config(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
 async def ws_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     entries = [e for e in _loaded(hass) if e.entry_id == msg["entry_id"]]
     if not entries:
-        connection.send_error(msg["id"], "not_found", "Irrigation Sequencer entry not loaded")
+        connection.send_error(msg["id"], "not_found", "Irrigation Scheduler entry not loaded")
         return
     entry = entries[0]
     opts = copy.deepcopy(normalize(entry.options))

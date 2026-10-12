@@ -1,9 +1,14 @@
 # How it works
 
-Irrigation Sequencer is a **custom integration**: Python code that Home Assistant loads like any built-in
+Irrigation Scheduler is a **custom integration**: Python code that Home Assistant loads like any built-in
 integration, plus one JavaScript file for the card and the Irrigation page. It is set up and changed in the
 Home Assistant UI. There is no YAML to write (it cannot be set up in `configuration.yaml`), and no automations or
 helpers of its own: it creates its own entities.
+
+Its technical name is still `irrigation_sequencer` (from when it was called Irrigation Sequencer): the folder,
+the actions (`irrigation_sequencer.run_cycle`, …), the event `irrigation_sequencer_message`, the card type
+`custom:irrigation-sequencer-card` and the page address `/irrigation-sequencer`. Home Assistant ties settings,
+entities and dashboards to that name, so it stays: renaming it would make it a different integration.
 
 ## The pieces
 
@@ -18,7 +23,7 @@ custom_components/irrigation_sequencer/
   switch.py number.py sensor.py binary_sensor.py
                      the entities (master switch, cycle switches, seasonal %, status, next cycle, people guard)
   services.py        the actions run_cycle, stop, skip_tap, run_tap
-  config_flow.py     the set-up screen and Settings > Devices & services > Irrigation Sequencer > Configure
+  config_flow.py     the set-up screen and Settings > Devices & services > Irrigation Scheduler > Configure
   websocket.py       what the card and the Irrigation page talk to (read the grid and the settings, save them)
   notify.py          phone notifications (tags, iOS thread, time-sensitive, the "Turn master switch on" button)
   diagnostics.py     the "Download diagnostics" file
@@ -53,7 +58,7 @@ Don't edit the `.storage` files by hand: Home Assistant rewrites them while it r
 1. **Irrigation page** in the sidebar (admins): the grid on top, every setting below. Saves by itself.
 2. **The card** on any dashboard: tap a cell or a cycle header for minutes, run order, soak, time and days; ⚙ for
    every other setting.
-3. **Settings > Devices & services > Irrigation Sequencer > Configure**: Home Assistant's own screens for the
+3. **Settings > Devices & services > Irrigation Scheduler > Configure**: Home Assistant's own screens for the
    same settings. These still work if the card ever fails to load.
 4. **Ask Claude**: it can read and change the settings through your Home Assistant connection.
 
@@ -66,5 +71,5 @@ message is also the event `irrigation_sequencer_message`, for your own automatio
 brings it to Home Assistant. A change made in Home Assistant with the File editor or Studio Code Server works,
 but the next HACS update overwrites it.
 
-**The card's own options** (title, which Irrigation Sequencer when you have more than one) are YAML in the
+**The card's own options** (title, which Irrigation Scheduler when you have more than one) are YAML in the
 dashboard, like any card: `type: custom:irrigation-sequencer-card`, `title:`, `entry_id:`.

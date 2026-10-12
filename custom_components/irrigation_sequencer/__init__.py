@@ -1,4 +1,4 @@
-"""Irrigation Sequencer: waters a garden one tap at a time over scheduled cycles.
+"""Irrigation Scheduler: waters a garden one tap at a time over scheduled cycles.
 
 Replaces the Irrigation Sequencer blueprint (v1.5.1). The engine
 (engine.py) holds every rule; this module wires it into Home Assistant.

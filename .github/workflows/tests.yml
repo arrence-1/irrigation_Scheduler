@@ -70,7 +70,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="Scheduled test failed: a Home Assistant update may break Irrigation Sequencer"
+          title="Scheduled test failed: a Home Assistant update may break Irrigation Scheduler"
           open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
           body="@$OWNER the scheduled test failed: $RUN
 

@@ -14,7 +14,7 @@ ENTITY_PICK = "Leave empty to switch this off."
 cfg = {
     "step": {
         "user": {
-            "title": "Irrigation Sequencer",
+            "title": "Irrigation Scheduler",
             "description": "Waters your garden one tap at a time over scheduled cycles. Choose how many taps (valves) "
                            "and cycles you need; both can be changed later.",
             "data": {"name": "Name", "tap_count": "Number of taps", "cycle_count": "Number of cycles"},
@@ -55,7 +55,7 @@ opt = {
     },
     "step": {
         "init": {
-            "title": "Irrigation Sequencer settings",
+            "title": "Irrigation Scheduler settings",
             "description": "Pick what to change. Each screen saves when you press Submit. Minutes, run order and "
                            "soak can also be edited on the dashboard card.",
             "menu_options": {
@@ -261,7 +261,7 @@ services = {
     },
 }
 
-data = {"title": "Irrigation Sequencer", "config": cfg, "options": opt, "entity": entity, "services": services}
+data = {"title": "Irrigation Scheduler", "config": cfg, "options": opt, "entity": entity, "services": services}
 OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 print(f"wrote {OUT}")

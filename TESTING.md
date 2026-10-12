@@ -1,4 +1,4 @@
-# Test report — Irrigation Sequencer 1.0.0 (10 Oct 2026)
+# Test report — Irrigation Scheduler (1.0.0 on 10 Oct 2026; later versions at the end)
 
 **Result: 85 / 85 automated tests pass on Home Assistant 2026.9.4 (your version) and on 2026.10.0** (the
 latest release), plus a live smoke test in a real Home Assistant 2026.9.4 with its frontend. Nothing was
@@ -141,3 +141,8 @@ No change to the integration's behaviour; this release puts it on GitHub for HAC
 ## 1.3.2 (13 Oct 2026)
 Only `hacs.json` (name) and the version strings changed. 96 / 96 tests on Home Assistant 2026.10.1, `release_check`
 OK, `hacs.json` checked against the HACS schema.
+
+## 1.3.3 (13 Oct 2026)
+Display name only ("Irrigation Sequencer" → "Irrigation Scheduler"; the technical name `irrigation_sequencer` is
+unchanged). 96 / 96 tests on Home Assistant 2026.10.1, hassfest 0 invalid, `ruff` clean, the card parses
+(`node --check`), `translations/en.json` regenerated (only the titles changed), `release_check` OK.

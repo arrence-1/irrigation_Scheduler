@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.3 (13 Oct 2026) — renamed Irrigation Scheduler
+
+* **Called Irrigation Scheduler everywhere you see it:** Settings > Devices & services, the set-up and Configure
+  screens, the device (maker and model), the card picker, the card's and the page's messages, error messages,
+  the README and the notes. (HACS already showed it since 1.3.2.)
+* **Nothing to redo:** the technical name stays `irrigation_sequencer`, so your settings, entities, dashboards
+  (`custom:irrigation-sequencer-card`), automations using the actions and the Irrigation page keep working.
+
 ## 1.3.2 (13 Oct 2026) — called Irrigation Scheduler in HACS
 
 * HACS lists it as **Irrigation Scheduler** (`hacs.json`). Nothing else changes: the integration, its entities,

@@ -1,12 +1,12 @@
-"""Constants for Irrigation Sequencer."""
+"""Constants for Irrigation Scheduler."""
 
 from __future__ import annotations
 
 from homeassistant.const import Platform
 
 DOMAIN = "irrigation_sequencer"
-NAME = "Irrigation Sequencer"
-VERSION = "1.3.2"
+NAME = "Irrigation Scheduler"
+VERSION = "1.3.3"
 
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.SENSOR, Platform.BINARY_SENSOR]
 

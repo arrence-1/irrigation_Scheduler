@@ -41,11 +41,11 @@ def get_coordinator(hass: HomeAssistant, entry_id: str | None) -> IrrigationCoor
     if entry_id:
         entries = [e for e in entries if e.entry_id == entry_id]
         if not entries:
-            raise ServiceValidationError(f"Irrigation Sequencer entry {entry_id} is not loaded")
+            raise ServiceValidationError(f"Irrigation Scheduler entry {entry_id} is not loaded")
     if not entries:
-        raise ServiceValidationError("Irrigation Sequencer is not set up")
+        raise ServiceValidationError("Irrigation Scheduler is not set up")
     if len(entries) > 1:
-        raise ServiceValidationError("More than one Irrigation Sequencer: give config_entry_id")
+        raise ServiceValidationError("More than one Irrigation Scheduler: give config_entry_id")
     return entries[0].runtime_data
 
 
