@@ -26,29 +26,43 @@ Tested: 96 automated tests against a real Home Assistant core, plus live UI test
 
 ## Install
 
-**HACS (recommended)**
-1. HACS > ⋮ (top right) > *Custom repositories* > Repository `https://github.com/arrence-1/irrigation_Scheduler`,
-   Type **Integration** > *Add*.
-2. Open **Irrigation Scheduler** (its name in HACS) > *Download* (the newest version).
-3. Restart Home Assistant. New versions then show up under *Settings > Updates* like any other update.
+### HACS
 
-**By hand:** download `irrigation_sequencer.zip` from the newest
-[release](https://github.com/arrence-1/irrigation_Scheduler/releases), unzip it into `/config/custom_components/`
-(you should end up with `/config/custom_components/irrigation_sequencer/manifest.json`) and restart.
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=arrence-1&repository=irrigation_Scheduler&category=integration)
 
-**Add it:** Settings > Devices & services > *Add integration* > **Irrigation Scheduler**
-1. Name (`Irrigation` gives `switch.irrigation_master` …), number of taps (6) and cycles (4).
-2. Pick a valve per tap (Toggle helpers for a first test). Tap names come from the valve names; rename them on the
-   Irrigation page (*Taps*).
-3. Add the card to a dashboard: *Edit dashboard > Add card >* search **Irrigation Scheduler** (or YAML
-   `type: custom:irrigation-sequencer-card`). The integration registers the card as a dashboard resource itself; if
-   your dashboard resources are in YAML mode, add `/irrigation_sequencer_static/irrigation-sequencer-card.js`
-   (type `module`) to them.
+1. Click the button above, or in HACS: ⋮ → *Custom repositories* → add
+   `https://github.com/arrence-1/irrigation_Scheduler` as **Integration**.
+2. Download **Irrigation Scheduler** and restart Home Assistant.
+3. Add the integration:
 
-The **master switch starts OFF**: nothing is scheduled until you turn it on. Manual runs are timed from the start.
+   [![Open your Home Assistant instance and start setting up Irrigation Scheduler.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=irrigation_sequencer)
 
-**Switching over from other irrigation automations.** Two schedulers must never drive the same valves: this
-integration times *every* tap that is switched on (a manual run closes after its timer), so while other irrigation
+   or *Settings → Devices & services → Add integration → Irrigation Scheduler*. Give it a name (`Irrigation`
+   gives `switch.irrigation_master` …), the number of taps and cycles, and a valve for each tap (Toggle helpers
+   for a first test).
+4. Open **Irrigation** in the sidebar, give the cycles their minutes, and turn the **master switch** on (it starts
+   off, so nothing waters until you do).
+
+New versions then show up under *Settings → Updates* like any other update.
+
+### Manual
+
+Download `irrigation_sequencer.zip` from the newest [release](https://github.com/arrence-1/irrigation_Scheduler/releases)
+and unzip it into `config/custom_components/` (you should end up with
+`config/custom_components/irrigation_sequencer/manifest.json`), then restart Home Assistant.
+
+Requires Home Assistant 2026.9 or newer.
+
+### Dashboard card
+
+*Edit dashboard → Add card →* search **Irrigation Scheduler** (or YAML `type: custom:irrigation-sequencer-card`).
+The integration adds the card to your dashboard resources itself. If your dashboard resources are in YAML mode, add
+`/irrigation_sequencer_static/irrigation-sequencer-card.js` (type `module`) to them.
+
+### Before you switch the real valves over
+
+Two schedulers must never drive the same valves: this integration times *every* tap that is switched on (a
+manual run closes after its timer), so while other irrigation
 automations or blueprints still switch the valves, point it only at **Toggle helpers** (pretend valves). When you
 switch over, **disable** the old automations (don't delete them: they are your fallback, see
 [Updating](docs/updating.md)), then give the integration the real valves.

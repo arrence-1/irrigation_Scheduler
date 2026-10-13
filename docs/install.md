@@ -4,7 +4,10 @@ You need Home Assistant **2026.9 or newer**, an admin user, and (for the easy wa
 
 ## With HACS (recommended)
 
-Once per Home Assistant:
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=arrence-1&repository=irrigation_Scheduler&category=integration)
+
+The button opens this repository in HACS on your own Home Assistant (it asks for your Home Assistant's address the
+first time). Or, once per Home Assistant:
 1. **HACS** > ⋮ (top right) > **Custom repositories**.
 2. Repository: `https://github.com/arrence-1/irrigation_Scheduler`, Type: **Integration** > **Add**.
 
@@ -30,7 +33,9 @@ through HACS.
 
 ## Add it
 
-**Settings > Devices & services > Add integration > Irrigation Scheduler**
+[![Open your Home Assistant instance and start setting up Irrigation Scheduler.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=irrigation_sequencer)
+
+or **Settings > Devices & services > Add integration > Irrigation Scheduler**
 1. A name (`Irrigation` gives `switch.irrigation_master`, `sensor.irrigation_status`, …), the number of taps and
    cycles (you can change both later).
 2. A valve for each tap: any `switch`, `valve` or `input_boolean`. For a first test use Toggle helpers (pretend
