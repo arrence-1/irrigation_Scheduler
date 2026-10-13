@@ -2,14 +2,24 @@
 
 ## How a new version gets to Home Assistant
 
+Test on Home Assistant first, publish after:
+
 ```
-change the code ─▶ tools/bump_version.py 1.3.2 + CHANGELOG ─▶ commit, push to main
-      ─▶ Actions > Release > Run workflow (or a v1.3.2 tag)
-      ─▶ GitHub Actions: checks the versions, runs the tests, publishes the release (with a zip)
-      ─▶ HACS sees the release ─▶ Settings > Updates > Irrigation Scheduler > Install ─▶ restart Home Assistant
+1. change   Claude changes the code on the `dev` branch and runs the tests (dev is pushed to GitHub as a
+            backup; HACS never looks at it)
+2. test     Claude copies the integration from `dev` straight into Home Assistant
+            (/config/custom_components/irrigation_sequencer/) and restarts it when nothing is watering.
+            You try it. Not right? Back to 1.
+3. publish  When you're happy: Claude moves it to `main`, you press Actions > Release > Run workflow
+4. HACS     offers that version under Settings > Updates. It is the code you already tested; install it
+            (and restart once) so HACS knows which version you have.
 ```
 
-Code on `main` that is not released yet never reaches Home Assistant: HACS installs releases.
+`main` only ever holds versions you have tested, and HACS installs releases from `main`, never `dev`.
+
+The card's address carries the version and a fingerprint of the card file (`…card.js?v=1.3.3-a2fc7506`), so a
+changed card loads fresh after the restart, even between two tests of the same version. If a phone still shows the
+old card: Companion app > Settings > Debugging > *Reset frontend cache*.
 
 HACS looks at GitHub for a custom repository when Home Assistant starts and then every 48 hours. To look now:
 HACS > Irrigation Scheduler > ⋮ > *Update information*.
@@ -22,10 +32,11 @@ older one > restart. The settings are not touched.
 
 ## Making a release
 
-**Asking Claude** (with GitHub connected to Claude): describe the change. Claude changes the code, runs the
-tests, sets the version, writes the CHANGELOG entry and pushes it to `main`. Then **you** publish it: on GitHub,
-*Actions > Release > Run workflow > Run workflow* (leave the box empty). Claude's session can push code but can't
-create tags, so nothing reaches Home Assistant until you press that button.
+**Asking Claude** (with GitHub connected to Claude): describe the change. Claude changes the code on `dev`, runs
+the tests, sets the version, writes the CHANGELOG entry and copies it into Home Assistant for you to test. Once you
+say it's good, Claude merges it into `main`, and **you** publish it: on GitHub, *Actions > Release > Run workflow >
+Run workflow* (leave the box empty). Claude's session can push code but can't create tags, so no release happens
+until you press that button.
 
 **By hand on github.com:**
 1. Change the files (the pencil icon on a file, then *Commit changes*). Change the version in

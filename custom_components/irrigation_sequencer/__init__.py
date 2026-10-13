@@ -6,6 +6,7 @@ Replaces the Irrigation Sequencer blueprint (v1.5.1). The engine
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
+    CARD_FILE,
     CARD_URL,
     DOMAIN,
     PANEL_ELEMENT,
@@ -46,6 +48,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+def _card_tag() -> str:
+    """The card's ?v= value: the version plus a short fingerprint of the card file.
+
+    A changed card file always gets a new address, so browsers and the phone app load it fresh after a
+    restart, also when the file was copied in for a quick test without a new version number.
+    """
+    data = (Path(__file__).parent / "frontend" / CARD_FILE).read_bytes()
+    return f"{VERSION}-{hashlib.sha256(data).hexdigest()[:8]}"
+
+
+async def _async_card_url(hass: HomeAssistant) -> str:
+    return f"{CARD_URL}?v={await hass.async_add_executor_job(_card_tag)}"
+
+
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Serve the card and load it as a dashboard resource.
 
@@ -66,8 +82,9 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     except RuntimeError:
         pass  # already registered (integration reloaded)
 
+    url = await _async_card_url(hass)
+
     async def _register(_event: Event | None = None) -> None:
-        url = f"{CARD_URL}?v={VERSION}"
         resources = _lovelace_resources(hass)
         if resources is None:
             if "frontend" in hass.config.components:
@@ -119,7 +136,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         webcomponent_name=PANEL_ELEMENT,
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
-        module_url=f"{CARD_URL}?v={VERSION}",
+        module_url=await _async_card_url(hass),
         require_admin=True,
         config={},
     )

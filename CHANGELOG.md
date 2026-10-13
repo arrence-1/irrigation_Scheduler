@@ -5,6 +5,9 @@
 * **Called Irrigation Scheduler everywhere you see it:** Settings > Devices & services, the set-up and Configure
   screens, the device (maker and model), the card picker, the card's and the page's messages, error messages,
   the README and the notes. (HACS already showed it since 1.3.2.)
+* The card's address now carries a fingerprint of the card file as well as the version
+  (`?v=1.3.3-a2fc7506`), so a changed card always loads fresh after a restart, also while testing a build
+  that keeps the same version number.
 * **Nothing to redo:** the technical name stays `irrigation_sequencer`, so your settings, entities, dashboards
   (`custom:irrigation-sequencer-card`), automations using the actions and the Irrigation page keep working.
 

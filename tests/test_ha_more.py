@@ -173,6 +173,9 @@ async def test_card_resource_registration(hass: HomeAssistant, rig: Rig, monkeyp
     import custom_components.irrigation_sequencer as I
     from custom_components.irrigation_sequencer.const import CARD_URL, VERSION
 
+    tag = I._card_tag()
+    assert tag.startswith(f"{VERSION}-") and len(tag) == len(VERSION) + 9  # version + 8-character fingerprint
+
     class FakeResources:
         def __init__(self) -> None:
             self.items = [{"id": "old", "type": "module", "url": f"{CARD_URL}?v=0.9.0"},
@@ -204,10 +207,10 @@ async def test_card_resource_registration(hass: HomeAssistant, rig: Rig, monkeyp
 
     hass.http = FakeHttp()
     await I._async_register_card(hass)
-    assert res.items == [{"id": "old", "type": "module", "url": f"{CARD_URL}?v={VERSION}"}]  # updated, duplicate removed
+    assert res.items == [{"id": "old", "type": "module", "url": f"{CARD_URL}?v={tag}"}]  # updated, duplicate removed
     res.items = []
     await I._async_register_card(hass)
-    assert res.items == [{"id": "new", "type": "module", "url": f"{CARD_URL}?v={VERSION}"}]  # created
+    assert res.items == [{"id": "new", "type": "module", "url": f"{CARD_URL}?v={tag}"}]  # created
     entry = await rig.setup_entry(make_options())
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
@@ -309,7 +312,7 @@ async def test_sidebar_page_registered_and_removed(hass: HomeAssistant, rig: Rig
     import custom_components.irrigation_sequencer as I
     from homeassistant.components import frontend, panel_custom
 
-    from custom_components.irrigation_sequencer.const import CARD_URL, PANEL_URL, VERSION
+    from custom_components.irrigation_sequencer.const import CARD_URL, PANEL_URL
 
     calls: list[dict] = []
     panels: dict = {}
@@ -333,7 +336,7 @@ async def test_sidebar_page_registered_and_removed(hass: HomeAssistant, rig: Rig
     e1 = await rig.setup_entry(make_options())
     assert calls == [{"frontend_url_path": PANEL_URL, "webcomponent_name": "irrigation-sequencer-panel",
                       "sidebar_title": "Irrigation", "sidebar_icon": "mdi:sprinkler-variant",
-                      "module_url": f"{CARD_URL}?v={VERSION}", "require_admin": True, "config": {}}]
+                      "module_url": f"{CARD_URL}?v={I._card_tag()}", "require_admin": True, "config": {}}]
     await I._async_register_panel(hass)  # a second entry / a reload: not added twice
     assert len(calls) == 1
     assert await hass.config_entries.async_remove(e1.entry_id)

@@ -146,3 +146,5 @@ OK, `hacs.json` checked against the HACS schema.
 Display name only ("Irrigation Sequencer" → "Irrigation Scheduler"; the technical name `irrigation_sequencer` is
 unchanged). 96 / 96 tests on Home Assistant 2026.10.1, hassfest 0 invalid, `ruff` clean, the card parses
 (`node --check`), `translations/en.json` regenerated (only the titles changed), `release_check` OK.
+Card address fingerprint: `_card_tag()` gives `1.3.3-a2fc7506`; the resource and the Irrigation page both use
+it (the two tests that check the address now expect it).
