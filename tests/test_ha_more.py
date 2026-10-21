@@ -271,6 +271,25 @@ async def test_settings_websocket_every_group(hass: HomeAssistant, rig: Rig, has
     assert out["options"]["main"] == {"valve": "light.main_water", "wait_min": 240, "auto_close": True,
                                       "remind_min": 720, "remind_cycle": True}
     assert rig.coord.cfg.main_valve == "light.main_water" and rig.coord.cfg.main_auto_close
+    out = await save("offline", {"wait_min": 0, "no_answer": "explode", "ask_ahead": False})
+    assert out["options"]["offline"] == {"wait_min": 1, "no_answer": "stop", "ask_ahead": False}
+    out = await save("offline", {"wait_min": 45, "no_answer": "skip", "ask_ahead": True})
+    assert rig.coord.cfg.off_wait_min == 45 and rig.coord.cfg.off_no_answer == "skip"
+    out = await save("battery", {"pct": 150, "remind_h": 99, "quiet_on": True, "quiet_from": "22:15:00",
+                                 "quiet_to": "6:5", "report_on": True, "report_days": 7, "report_time": "09:30:00",
+                                 "report_start": "2026-11-01"})
+    assert out["options"]["battery"] == {"pct": 100, "remind_h": 48, "quiet_on": True, "quiet_from": "22:15",
+                                         "quiet_to": "06:05", "report_on": True, "report_days": 7,
+                                         "report_time": "09:30", "report_start": "2026-11-01"}
+    out = await save("battery", {"report_start": "not a date", "pct": 30})
+    assert out["options"]["battery"]["report_start"] == "" and out["options"]["battery"]["pct"] == 30
+    out = await save("tap", {"battery": "sensor.tap_1_battery"}, tap=1)
+    assert out["options"]["taps"][0]["battery"] == "sensor.tap_1_battery"
+    assert rig.coord.battery_ids[0] == "sensor.tap_1_battery"
+    res = await call(type=f"{DOMAIN}/config", entry_id=entry.entry_id)
+    cfg = res["result"]["entries"][0]
+    assert cfg["taps"][0]["battery"] == "sensor.tap_1_battery" and cfg["taps"][1]["battery"] == ""
+    assert cfg["offline_wait_min"] == 45 and cfg["battery_pct"] == 30
 
     # bad requests
     r = await call(type=f"{DOMAIN}/save_settings", entry_id=entry.entry_id, group="tap", data={"name": "x"}, tap=9)

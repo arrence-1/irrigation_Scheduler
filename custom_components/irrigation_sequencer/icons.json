@@ -1,11 +1,23 @@
 {
   "entity": {
     "switch": {
-      "master": { "default": "mdi:sprinkler-variant", "state": { "off": "mdi:water-off" } },
-      "cycle": { "default": "mdi:calendar-clock", "state": { "off": "mdi:calendar-remove" } }
+      "master": {
+        "default": "mdi:sprinkler-variant",
+        "state": {
+          "off": "mdi:water-off"
+        }
+      },
+      "cycle": {
+        "default": "mdi:calendar-clock",
+        "state": {
+          "off": "mdi:calendar-remove"
+        }
+      }
     },
     "number": {
-      "seasonal_adjustment": { "default": "mdi:sun-thermometer" }
+      "seasonal_adjustment": {
+        "default": "mdi:sun-thermometer"
+      }
     },
     "sensor": {
       "status": {
@@ -16,24 +28,55 @@
           "gap": "mdi:timer-sand",
           "soaking": "mdi:water-sync",
           "waiting": "mdi:account-clock",
+          "offline": "mdi:lan-disconnect",
           "held": "mdi:pause-circle",
           "manual": "mdi:hand-water",
           "stuck": "mdi:alert-octagon"
         }
       },
-      "next_cycle": { "default": "mdi:calendar-arrow-right" }
+      "next_cycle": {
+        "default": "mdi:calendar-arrow-right"
+      }
     },
     "binary_sensor": {
-      "tap_blocked": { "default": "mdi:account-off", "state": { "on": "mdi:account-alert" } }
+      "tap_blocked": {
+        "default": "mdi:account-off",
+        "state": {
+          "on": "mdi:account-alert"
+        }
+      }
     }
   },
   "services": {
-    "run_cycle": { "service": "mdi:play-circle" },
-    "stop": { "service": "mdi:stop-circle" },
-    "skip_tap": { "service": "mdi:skip-next" },
-    "run_tap": { "service": "mdi:hand-water" },
-    "close_main_water": { "service": "mdi:water-off" },
-    "open_main_water": { "service": "mdi:water-pump" },
-    "snooze_main_water_reminders": { "service": "mdi:bell-sleep" }
+    "run_cycle": {
+      "service": "mdi:play-circle"
+    },
+    "stop": {
+      "service": "mdi:stop-circle"
+    },
+    "skip_tap": {
+      "service": "mdi:skip-next"
+    },
+    "run_tap": {
+      "service": "mdi:hand-water"
+    },
+    "close_main_water": {
+      "service": "mdi:water-off"
+    },
+    "open_main_water": {
+      "service": "mdi:water-pump"
+    },
+    "snooze_main_water_reminders": {
+      "service": "mdi:bell-sleep"
+    },
+    "skip_offline_tap": {
+      "service": "mdi:debug-step-over"
+    },
+    "snooze_battery_warnings": {
+      "service": "mdi:battery-clock"
+    },
+    "send_battery_report": {
+      "service": "mdi:battery-heart-variant"
+    }
   }
 }

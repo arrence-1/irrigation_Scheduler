@@ -16,7 +16,7 @@ Ported from the Irrigation Sequencer blueprint v1.5.1 planner.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, time as dtime, timedelta, tzinfo
+from datetime import date, datetime, time as dtime, timedelta, tzinfo
 from typing import Any
 
 from .model import DAYS, Cfg, CycleCfg
@@ -45,6 +45,9 @@ HOT_FOR_S = 600
 HOT_REARM_C = 1.0
 RAIN_REARM_S = 1800
 WET_WEATHER = ("rainy", "pouring", "lightning-rainy")
+AHEAD_S = 1200  # the offline question goes out 20 min before a cycle
+BAT_REARM = 5  # a low battery counts as fine again 5 % above the warning level (no flip-flopping)
+OFFLINE_ASK = ("offline", "offline_open", "offline_ahead")  # offline messages with buttons
 
 
 # --------------------------------------------------------------------------
@@ -91,6 +94,25 @@ class State:
     main_snooze_until: float = 0.0  # reminders snoozed until then
     main_reminded: bool = False  # a reminder is showing
     main_cycle_rem: dict[str, list[float]] = field(default_factory=dict)  # cycle -> [occurrence ts, level]
+    # offline valves
+    off_skip: list[bool] = field(default_factory=list)  # skipped while offline (until it is back online)
+    off_seen: list[str] = field(default_factory=list)  # last state seen while online: "on" / "off" / "" (unknown)
+    off_since: list[float] = field(default_factory=list)  # when it went offline (0 = online)
+    off_wait: float = 0.0  # the running cycle waits for an answer since then (0 = not waiting)
+    off_asked: list[int] = field(default_factory=list)  # taps in the offline question that is showing
+    off_shown: bool = False  # an offline question (with buttons) is showing
+    off_ahead: dict[str, float] = field(default_factory=dict)  # cycle -> occurrence asked about 20 min ahead
+    # valve batteries
+    bat_level: list[float] = field(default_factory=list)  # last known % per tap (-1 = unknown)
+    bat_low: list[bool] = field(default_factory=list)
+    bat_next: float = 0.0  # next low-battery warning (0 = none planned)
+    bat_snooze_until: float = 0.0
+    bat_snoozed: list[int] = field(default_factory=list)  # taps the snooze covers
+    bat_last: list[int] = field(default_factory=list)  # taps in the last warning
+    bat_shown: bool = False  # a low-battery warning is showing
+    rep_anchor: str = ""  # date the battery report counts from when no start date is set
+    rep_fp: str = ""  # report settings the schedule was worked out for
+    rep_last: int = 0  # epoch minute of the last report occurrence handled
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -125,6 +147,20 @@ class State:
             for k in ("main_off_since", "main_remind_at", "main_snooze_until"):
                 setattr(st, k, float(getattr(st, k)))
             st.main_cycle_rem = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.main_cycle_rem).items()}
+            st.off_skip = [bool(x) for x in st.off_skip]
+            st.off_seen = [str(x) if x in (V_ON, V_OFF) else "" for x in st.off_seen]
+            st.off_since = [float(x) for x in st.off_since]
+            st.off_wait = float(st.off_wait)
+            st.off_asked = [int(x) for x in st.off_asked]
+            st.off_shown = bool(st.off_shown)
+            st.off_ahead = {str(k): float(v) for k, v in dict(st.off_ahead).items()}
+            st.bat_level = [float(x) for x in st.bat_level]
+            st.bat_low = [bool(x) for x in st.bat_low]
+            st.bat_next, st.bat_snooze_until = float(st.bat_next), float(st.bat_snooze_until)
+            st.bat_snoozed = [int(x) for x in st.bat_snoozed]
+            st.bat_last = [int(x) for x in st.bat_last]
+            st.bat_shown = bool(st.bat_shown)
+            st.rep_anchor, st.rep_fp, st.rep_last = str(st.rep_anchor), str(st.rep_fp), int(st.rep_last)
             st.reminders = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.reminders).items()}
         except (TypeError, ValueError, KeyError, IndexError):
             fresh = cls()
@@ -165,6 +201,7 @@ class Snapshot:
     reasons: set[str] = field(default_factory=set)
     requests: list[dict[str, Any]] = field(default_factory=list)
     main: str = V_NONE  # main water valve: on / off / offline / none
+    battery: list[float | None] = field(default_factory=list)  # % per tap (None = no sensor / unavailable)
 
 
 @dataclass
@@ -262,6 +299,15 @@ def fit(st: State, cfg: Cfg) -> None:
     st.remaining = _fit(st.remaining, T, 0)
     st.ready = _fit(st.ready, T, 0.0)
     st.cycle_on = _fit(st.cycle_on, C, True)
+    st.off_skip = _fit(st.off_skip, T, False)
+    st.off_seen = _fit(st.off_seen, T, "")
+    st.off_since = _fit(st.off_since, T, 0.0)
+    st.off_asked = [i for i in st.off_asked if 0 <= i < T]
+    st.off_ahead = {k: v for k, v in st.off_ahead.items() if k.isdigit() and int(k) < C}
+    st.bat_level = _fit(st.bat_level, T, -1.0)
+    st.bat_low = _fit(st.bat_low, T, False)
+    st.bat_snoozed = [i for i in st.bat_snoozed if 0 <= i < T]
+    st.bat_last = [i for i in st.bat_last if 0 <= i < T]
     if st.tap >= T:
         st.tap = -1
         if st.mode in (WATERING, MANUAL, STUCK):
@@ -284,6 +330,7 @@ def _reset_cycle(st: State, T: int) -> None:
     st.ready = [0.0] * T
     st.people_wait = 0.0
     st.held_note = False
+    st.off_wait = 0.0
 
 
 def _people_on(cfg: Cfg, sn: Snapshot, i: int) -> int:
@@ -299,6 +346,105 @@ def _bypassed(sn: Snapshot, i: int) -> bool:
 def main_is_off(cfg: Cfg, sn: Snapshot | None) -> bool:
     """The main water valve is set and reports off (offline / unknown does not count)."""
     return bool(cfg.main_valve) and sn is not None and sn.main == V_OFF
+
+
+def _offline(sn: Snapshot, i: int) -> bool:
+    return i < len(sn.valves) and sn.valves[i] == V_OFFLINE
+
+
+def can_skip_offline(st: State, i: int) -> bool:
+    """An offline valve may be skipped only when it was not last seen open (a flat-battery valve stays put)."""
+    return 0 <= i < len(st.off_seen) and st.off_seen[i] != V_ON and not (st.mode == STUCK and st.tap == i)
+
+
+def offline_blockers(st: State, cfg: Cfg, sn: Snapshot) -> list[int]:
+    """Offline valves that keep every tap shut: not skipped, not bypassed and not the stuck tap (handled apart)."""
+    return [
+        i for i in range(len(cfg.taps))
+        if cfg.taps[i].valve and _offline(sn, i) and not (i < len(st.off_skip) and st.off_skip[i])
+        and not _bypassed(sn, i) and not (st.mode == STUCK and st.tap == i)
+    ]
+
+
+def _names(cfg: Cfg, taps: list[int]) -> str:
+    return ", ".join(cfg.label(t) for t in taps)
+
+
+def _off_detail(st: State, cfg: Cfg, t: int, now: float, tz: tzinfo) -> str:
+    """'Tap 2 (Backyard) has been offline since 05:40 (last seen closed; battery 12% then)'."""
+    since = st.off_since[t] if t < len(st.off_since) else 0.0
+    head = (f"{cfg.label(t)} has been offline since {_hm(since, tz) if now - since < 20 * 3600 else _dhm(since, tz)}"
+            if since else f"{cfg.label(t)} is offline")
+    bits = []
+    seen = st.off_seen[t] if t < len(st.off_seen) else ""
+    if seen == V_OFF:
+        bits.append("last seen closed")
+    elif seen == V_ON:
+        bits.append("last seen OPEN")
+    lvl = st.bat_level[t] if t < len(st.bat_level) else -1.0
+    if lvl >= 0:
+        bits.append(f"battery {_g(round(lvl))}% then")
+    return head + (f" ({'; '.join(bits)})" if bits else "")
+
+
+def _mins(hhmm: str) -> int:
+    h, m = _parse_hm(hhmm)
+    return h * 60 + m
+
+
+def in_quiet(cfg: Cfg, now: float, tz: tzinfo) -> bool:
+    """Inside the battery warnings' quiet time (e.g. 21:00-06:00, over midnight)."""
+    if not cfg.quiet_on:
+        return False
+    f, t = _mins(cfg.quiet_from), _mins(cfg.quiet_to)
+    if f == t:
+        return False
+    d = datetime.fromtimestamp(now, tz)
+    m = d.hour * 60 + d.minute
+    return f <= m < t if f < t else (m >= f or m < t)
+
+
+def _quiet_end(cfg: Cfg, now: float, tz: tzinfo) -> float:
+    h, m = _parse_hm(cfg.quiet_to)
+    nd = datetime.fromtimestamp(now, tz)
+    for k in range(3):
+        dt = datetime.combine(nd.date() + timedelta(days=k), dtime(h, m), tzinfo=tz)
+        if dt.timestamp() > now:
+            return dt.timestamp()
+    return now + 86400
+
+
+def _rep_anchor(st: State, cfg: Cfg) -> date | None:
+    try:
+        return date.fromisoformat(cfg.rep_start or st.rep_anchor)
+    except ValueError:
+        return None
+
+
+def report_times(st: State, cfg: Cfg, now: float, tz: tzinfo) -> tuple[float, float]:
+    """Battery report: (last time at or before now, next time after now); 0 = none."""
+    a = _rep_anchor(st, cfg)
+    if not cfg.rep_on or a is None:
+        return 0.0, 0.0
+    h, m = _parse_hm(cfg.rep_time)
+    days = max(cfg.rep_days, 1)
+    k = max((datetime.fromtimestamp(now, tz).date() - a).days // days, 0)
+    last = nxt = 0.0
+    for kk in (k - 1, k, k + 1):
+        if kk < 0:
+            continue
+        o = datetime.combine(a + timedelta(days=kk * days), dtime(h, m), tzinfo=tz).timestamp()
+        if o <= now:
+            last = max(last, o)
+        elif not nxt:
+            nxt = o
+    return last, nxt
+
+
+def _ddhm(ts: float, tz: tzinfo) -> str:
+    """'Wed 4 Nov 10:00'."""
+    d = datetime.fromtimestamp(ts, tz)
+    return f"{d:%a} {d.day} {d:%b %H:%M}"
 
 
 # --------------------------------------------------------------------------
@@ -339,6 +485,30 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
         """A scheduled tap stopped early keeps its unused time."""
         if 0 <= i < T:
             st.remaining[i] += max(int(round(st.end - now)), 0)
+
+    # ---------- 1. offline valves: the last state seen, back online ----------
+    for i in range(T):
+        v = sn.valves[i]
+        if v == V_NONE:
+            st.off_skip[i], st.off_seen[i], st.off_since[i] = False, "", 0.0
+            continue
+        if v == V_OFFLINE:
+            if not st.off_since[i]:
+                st.off_since[i] = now
+            continue
+        was_offline = st.off_since[i] > 0
+        st.off_since[i] = 0.0
+        st.off_seen[i] = v
+        if st.off_skip[i]:
+            st.off_skip[i] = False
+            if v == V_ON and not _bypassed(sn, i):
+                close(i)  # it was skipped as closed: it must not run unannounced
+                msg(("offline_note", i + 1, f"{lbl(i)} is back online but reports open, so it was closed. "
+                                            "It is in the cycles again."))
+            else:
+                msg(("offline_note", i + 1, f"{lbl(i)} is back online: it is in the cycles again."))
+        elif was_offline and i in st.off_asked:
+            msg(("offline_note", i + 1, f"{lbl(i)} is back online."))
 
     # ---------- 2. due and missed cycles -> pending queue ----------
     occ_last = [last_occurrence(c, now, tz) for c in cfg.cycles]
@@ -402,6 +572,7 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
     st.pending = keep
 
     run_tap_req: dict[str, Any] | None = None
+    report_now = False
     for req in sn.requests:
         kind = req.get("type")
         if kind == "stop":
@@ -456,6 +627,24 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
                 msg(("main", 0, f"The main water is already {'off' if want_off else 'on'}."))
             else:
                 plan.main = "close" if want_off else "open"
+        elif kind == "skip_offline":
+            _skip_offline(st, cfg, sn, plan, int(req.get("tap", -1)), bool(req.get("skip", True)))
+        elif kind == "stop_cycle":
+            if st.cycle >= 0:
+                if st.mode == WATERING:
+                    close(st.tap)
+                    give_back(st.tap)
+                msg(("offline_note" if st.off_wait else "cycle", st.cycle + 1,
+                     f"Cycle {st.cycle + 1} stopped at {hm} (requested)."))
+                _reset_cycle(st, T)
+                if st.mode in (WATERING, GAP):
+                    st.mode, st.tap, st.end = IDLE, -1, 0.0
+            else:
+                msg(("offline_note", 0, "No cycle is running: there is nothing to stop."))
+        elif kind == "snooze_battery":
+            _snooze_battery(st, cfg, sn, plan, max(float(req.get("hours", 0) or 0), 0.0))
+        elif kind == "battery_report":
+            report_now = True
 
     # ---------- 4. what the valves are really doing ----------
     rv = st.tap if (st.mode in (WATERING, MANUAL, STUCK) and 0 <= st.tap < T) else -1
@@ -693,6 +882,10 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
     # ---------- 7. reminders, alerts, restart summary ----------
     _reminders(st, cfg, sn, plan, occ_next)
     _main_cycle_reminders(st, cfg, sn, plan, occ_next)
+    _offline_ahead(st, cfg, sn, plan, occ_next)
+    _offline_tidy(st, cfg, sn, plan)
+    _battery(st, cfg, sn, plan)
+    _battery_report(st, cfg, sn, plan, report_now)
     _alerts(st, cfg, sn, plan, occ_next)
     if startup and (loaded[0] != IDLE or loaded[4] > 0):
         _recovery(st, cfg, sn, plan, loaded)
@@ -754,8 +947,12 @@ def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
     soil_wet: list[str] = []
     soil_bad: list[str] = []
     over: list[str] = []
+    off_skipped: list[str] = []
     for t in range(T):
         d = c.minutes[t] if cfg.taps[t].valve else 0
+        if d > 0 and st.off_skip[t] and _offline(sn, t):
+            off_skipped.append(lbl(t))  # skipped while offline
+            d = 0
         s = int(round(d * 60 * pct / 100))
         if d > 0 and 0 < s < 60:
             s = 60
@@ -786,6 +983,10 @@ def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
         msg(("skip", ci + 1, f"Cycle {ci + 1} (due {due_txt}) skipped: soil wet enough for every tap: "
                              f"{', '.join(soil_wet)}."))
         return
+    if total == 0 and off_skipped:
+        msg(("skip", ci + 1, f"Cycle {ci + 1} (due {due_txt}) skipped: its taps are offline and skipped while "
+                             f"offline ({', '.join(off_skipped)})."))
+        return
     if total == 0:
         return  # no tap has minutes in this cycle: nothing to do, stay quiet
 
@@ -813,6 +1014,8 @@ def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
                           "those taps run in tap-number order."))
     if soil_wet:
         msg(("skip", ci + 1, f"Skipped {', '.join(soil_wet)}."))
+    if off_skipped:
+        msg(("skip", ci + 1, f"Skipped while offline: {', '.join(off_skipped)}."))
     if over:
         msg(("config", 0, f"Cycle {ci + 1}: over the {maxrt // 60} min safety limit, so it runs in parts: "
                           f"{', '.join(over)}. Consider cycle-and-soak or a lower %."))
@@ -828,6 +1031,15 @@ def _pick_next(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> bool:
     lbl = cfg.label
     maxrt = max(cfg.max_run_min * 60, 60)
     clear_s = max(cfg.people_clear_min * 60, 0)
+
+    # an offline valve can't be confirmed closed: nothing opens until it is back, skipped, or the wait is over
+    waiting = offline_blockers(st, cfg, sn)
+    if waiting:
+        return _offline_hold(st, cfg, sn, plan, waiting)
+    if st.off_wait:
+        st.off_wait = 0.0
+        msg(("offline_note", ci + 1, f"Cycle {ci + 1} carries on at {_hm(now, tz)}."))
+
     best, best_key = -1, None
     blocked: list[int] = []
     for t in range(T):
@@ -835,9 +1047,9 @@ def _pick_next(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> bool:
             continue
         if not cfg.taps[t].valve or sn.valves[t] == V_NONE:
             st.remaining[t] = 0
-        elif sn.valves[t] == V_OFFLINE:
+        elif sn.valves[t] == V_OFFLINE:  # only taps skipped while offline get here
             st.remaining[t] = 0
-            msg(("tap", t + 1, f"{lbl(t)} is offline; it is skipped in cycle {ci + 1}."))
+            msg(("skip", ci + 1, f"{lbl(t)} is offline: skipped in cycle {ci + 1} (skipped while offline)."))
         elif st.ready[t] <= now and _people_on(cfg, sn, t) > 0:
             blocked.append(t)
         elif st.ready[t] <= now:
@@ -849,7 +1061,8 @@ def _pick_next(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> bool:
     if best >= 0:
         # before opening, every other tap must report off
         bad = [t for t in range(T)
-               if t != best and cfg.taps[t].valve and sn.valves[t] not in (V_OFF, V_NONE) and not _bypassed(sn, t)]
+               if t != best and cfg.taps[t].valve and sn.valves[t] not in (V_OFF, V_NONE) and not _bypassed(sn, t)
+               and not (st.off_skip[t] and sn.valves[t] == V_OFFLINE)]
         if bad:
             msg(("tap", bad[0] + 1, f"Cycle {ci + 1} stopped: cannot confirm {lbl(bad[0])} is off (offline?)."))
             _reset_cycle(st, T)
@@ -895,6 +1108,250 @@ def _pick_next(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> bool:
     _reset_cycle(st, T)
     st.mode, st.tap, st.end = IDLE, -1, 0.0
     return True
+
+
+def _offline_hold(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, waiting: list[int]) -> bool:
+    """A valve is offline: the cycle waits and asks; after the wait it stops or skips it (setting).
+
+    Returns True when the cycle stopped (like _pick_next).
+    """
+    msg = plan.msgs.append
+    now, tz = sn.now, sn.tz
+    ci = st.cycle
+    n = len(waiting)
+    names = _names(cfg, waiting)
+    can = [t for t in waiting if can_skip_offline(st, t)]
+    first = not st.off_wait
+    if first:
+        st.off_wait = now
+    deadline = st.off_wait + max(cfg.off_wait_min, 1) * 60
+    if now >= deadline - 1:
+        if cfg.off_no_answer == "skip" and len(can) == n:
+            for t in waiting:
+                st.off_skip[t] = True
+                st.remaining[t] = 0
+            st.off_wait = 0.0
+            msg(("offline_note", ci + 1, f"No answer after {cfg.off_wait_min} min: {names} "
+                                         f"{_isare(n)} skipped while offline. Cycle {ci + 1} carries on at {_hm(now, tz)}."
+                                         + " Included again when back online."))
+            st.end = now
+            return _pick_next(st, cfg, sn, plan)
+        msg(("offline_note", ci + 1, f"Cycle {ci + 1} stopped at {_hm(now, tz)}: {names} {_isare(n)} still offline "
+                                     f"and there was no answer after {cfg.off_wait_min} min."
+             + (" It was last seen open, so it is not skipped." if cfg.off_no_answer == "skip" and len(can) < n else "")))
+        _reset_cycle(st, len(cfg.taps))
+        st.mode, st.tap, st.end = IDLE, -1, 0.0
+        return True
+    if first or sorted(waiting) != sorted(st.off_asked) or not st.off_shown:
+        st.off_asked = list(waiting)
+        detail = "; ".join(_off_detail(st, cfg, t, now, tz) for t in waiting)
+        then = ("stops" if cfg.off_no_answer == "stop" or len(can) < n
+                else f"skips {'it' if n == 1 else 'them'} and carries on")
+        if can:
+            ask = (f" Press and hold: skip {'it' if n == 1 else 'them'} while offline (included again when back "
+                   "online), or stop the cycle.")
+        else:
+            ask = (" It was last seen open and may still be running, so it can't be skipped: check it"
+                   + (", or close the main water." if cfg.main_valve else "."))
+        msg(("offline" if can else "offline_open", ci + 1,
+             f"Cycle {ci + 1} is waiting: {detail}. No tap opens while a valve can't be confirmed closed.{ask}"
+             f" With no answer by {_hm(deadline, tz)} the cycle {then}."))
+    return False
+
+
+def _isare(n: int) -> str:
+    return "is" if n == 1 else "are"
+
+
+def _skip_offline(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, tap: int, skip: bool) -> None:
+    """Skip a tap while its valve is offline (button / card / action), or include it again."""
+    msg = plan.msgs.append
+    T = len(cfg.taps)
+    lbl = cfg.label
+    if 0 <= tap < T:
+        targets = [tap]
+    else:
+        targets = [t for t in st.off_asked if _offline(sn, t)] or offline_blockers(st, cfg, sn)
+    if not targets:
+        msg(("offline_note", 0, "No valve is offline: there is nothing to skip."))
+        return
+    for t in targets:
+        if not cfg.taps[t].valve:
+            continue
+        if not skip:
+            st.off_skip[t] = False
+            msg(("offline_note", t + 1, f"{lbl(t)} is in the cycles again."
+                 + (" It is still offline, so cycles wait for it (you'll be asked)." if _offline(sn, t) else "")))
+        elif not _offline(sn, t):
+            msg(("offline_note", t + 1, f"{lbl(t)} is online: there is nothing to skip."))
+        elif not can_skip_offline(st, t):
+            msg(("offline_open", t + 1, f"{lbl(t)} was last seen open and may still be running, so it can't be "
+                                        "skipped: check it" + (", or close the main water." if cfg.main_valve else ".")))
+        elif not st.off_skip[t]:
+            st.off_skip[t] = True
+            if st.cycle >= 0:
+                st.remaining[t] = 0
+            msg(("offline_note", t + 1, f"{lbl(t)} is skipped in every cycle while it is offline; it is included "
+                                        "again when it is back online."))
+
+
+def _offline_ahead(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[float]) -> None:
+    """20 min before a cycle that would run: a valve is offline, ask now so the start isn't held up."""
+    now = sn.now
+    for k, occ in list(st.off_ahead.items()):
+        if now >= occ:
+            del st.off_ahead[k]
+    if not cfg.off_ask_ahead or not st.master or st.mode == STUCK or st.off_wait:
+        return
+    waiting = offline_blockers(st, cfg, sn)
+    if not waiting:
+        return
+    for i, occ in enumerate(occ_next):
+        if occ <= 0 or not st.cycle_on[i] or not cycle_has_water(cfg, i):
+            continue
+        d = occ - now
+        if not 0 < d <= AHEAD_S + 30 or st.off_ahead.get(str(i)) == occ:
+            continue
+        st.off_ahead[str(i)] = occ
+        if st.off_shown and sorted(waiting) == sorted(st.off_asked):
+            continue  # already asked about these valves
+        st.off_asked = list(waiting)
+        n = len(waiting)
+        detail = "; ".join(_off_detail(st, cfg, t, now, sn.tz) for t in waiting)
+        can = [t for t in waiting if can_skip_offline(st, t)]
+        tail = (f" Press and hold to skip {'it' if n == 1 else 'them'} while offline; otherwise the cycle waits at the "
+                "start and asks again." if can else
+                " It was last seen open and may still be running: check it before the cycle starts.")
+        plan.msgs.append(("offline_ahead" if can else "offline_open", i + 1,
+                          f"Cycle {i + 1} starts at {_hm(occ, sn.tz)} (in {max(int(round(d / 60)), 1)} min) but "
+                          f"{detail}.{tail}"))
+        return  # one question at a time
+
+
+def _offline_tidy(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
+    """Keep track of the offline question on the phone; clear it once nothing is offline any more."""
+    sent = {k for k, _n, _t in plan.msgs}
+    waiting = offline_blockers(st, cfg, sn)
+    if sent & set(OFFLINE_ASK):
+        st.off_shown = True
+    elif "offline_note" in sent:
+        st.off_shown = False  # the note replaced the question
+    elif st.off_shown and not st.off_wait and not waiting:
+        st.off_shown = False
+        plan.clear.append("offline")
+    if not st.off_wait and not waiting:
+        st.off_asked = []
+
+
+def _battery(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
+    """Valve batteries: warn at or below the level, repeat, respect the snooze and the quiet time."""
+    msg = plan.msgs.append
+    now, tz = sn.now, sn.tz
+    T = len(cfg.taps)
+    lbl = cfg.label
+    pct = cfg.bat_pct
+    for t in range(T):
+        v = sn.battery[t] if t < len(sn.battery) else None
+        if not cfg.taps[t].valve:
+            st.bat_level[t], st.bat_low[t] = -1.0, False
+        elif v is not None:
+            st.bat_level[t] = max(0.0, min(100.0, float(v)))
+    fine = []
+    for t in range(T):
+        lvl = st.bat_level[t]
+        if pct <= 0:
+            st.bat_low[t] = False
+        elif lvl >= 0 and lvl <= pct:
+            st.bat_low[t] = True
+        elif st.bat_low[t] and lvl >= pct + BAT_REARM:
+            st.bat_low[t] = False
+            fine.append(t)
+    if fine:
+        msg(("battery_note", 0, "Battery fine again: "
+             + ", ".join(f"{lbl(t)} {_g(round(st.bat_level[t]))}%" for t in fine) + "."))
+    low = [t for t in range(T) if st.bat_low[t]]
+    if not low:
+        if st.bat_shown and not fine:
+            plan.clear.append("battery")
+        st.bat_next = st.bat_snooze_until = 0.0
+        st.bat_snoozed, st.bat_last, st.bat_shown = [], [], False
+        return
+    snoozing = now < st.bat_snooze_until - 1
+    if st.bat_snooze_until and not snoozing:
+        st.bat_snooze_until, st.bat_snoozed = 0.0, []
+    due_taps = [t for t in low if not (snoozing and t in st.bat_snoozed)]
+    new = [t for t in due_taps if t not in st.bat_last]
+    if not due_taps or not (new or (st.bat_next > 0 and now >= st.bat_next - 1)):
+        return
+    if in_quiet(cfg, now, tz):
+        st.bat_next = max(st.bat_next, _quiet_end(cfg, now, tz))  # held until the quiet time ends
+        return
+    st.bat_last, st.bat_shown = list(low), True
+    st.bat_next = now + cfg.bat_remind_h * 3600 if cfg.bat_remind_h > 0 else 0.0
+    parts = [f"{lbl(t)} {_g(round(st.bat_level[t]))}%" + (" (offline)" if _offline(sn, t) else "") for t in low]
+    msg(("battery", 0, f"Low battery (warning at {pct}%): {'; '.join(parts)}. Replace the batteries soon: an offline "
+                       "valve makes the cycles wait."
+         + (f" Repeats every {_g(cfg.bat_remind_h)} h" + (f" (not {cfg.quiet_from}-{cfg.quiet_to})" if cfg.quiet_on
+                                                           and cfg.quiet_from != cfg.quiet_to else "")
+            + "; press and hold to snooze." if cfg.bat_remind_h > 0 else "")))
+
+
+def _snooze_battery(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, hours: float) -> None:
+    msg = plan.msgs.append
+    now, tz = sn.now, sn.tz
+    low = [t for t in range(len(cfg.taps)) if st.bat_low[t]]
+    if not low:
+        msg(("battery_note", 0, "No valve battery is low: there is nothing to snooze."))
+    elif hours <= 0:
+        st.bat_snooze_until, st.bat_snoozed = 0.0, []
+        st.bat_next = now
+        msg(("battery_note", 0, "Battery warnings are back on."))
+    else:
+        st.bat_snooze_until = now + hours * 3600
+        st.bat_snoozed = list(low)
+        st.bat_next = max(st.bat_next, st.bat_snooze_until)
+        st.bat_shown = False  # the note replaces the warning
+        msg(("battery_note", 0, f"Battery warnings snoozed for {_dur(hours * 3600)}, until "
+                                f"{_ddhm(st.bat_snooze_until, tz)}. Still low: {_names(cfg, low)}."))
+
+
+def _battery_report(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, asked: bool) -> None:
+    """Every report_days days at report_time (and on request): every tap valve's battery level."""
+    now, tz = sn.now, sn.tz
+    due = False
+    if not cfg.rep_on:
+        st.rep_anchor = st.rep_fp = ""
+    else:
+        if not cfg.rep_start and not st.rep_anchor:
+            st.rep_anchor = datetime.fromtimestamp(now, tz).date().isoformat()
+        last, _nxt = report_times(st, cfg, now, tz)
+        fp = f"{cfg.rep_start or st.rep_anchor}|{cfg.rep_days}|{cfg.rep_time}"
+        if st.rep_fp != fp:  # new or changed schedule: the past counts as done
+            st.rep_fp, st.rep_last = fp, int(last // 60)
+        if last and int(last // 60) > st.rep_last:
+            st.rep_last = int(last // 60)
+            due = now - last < MISSED_WINDOW_S
+    if not (due or asked):
+        return
+    lbl = cfg.label
+    taps = [t for t in range(len(cfg.taps)) if cfg.taps[t].valve]
+    known = [t for t in taps if st.bat_level[t] >= 0]
+    if not known:
+        if asked:
+            plan.msgs.append(("battery_report", 0, "No battery levels to report: none of the tap valves has a "
+                                                   "battery sensor (set one under the tap's settings)."))
+        return
+    parts = []
+    for t in taps:
+        lvl = st.bat_level[t]
+        parts.append(f"{lbl(t)}: no battery reading" if lvl < 0 else
+                     f"{lbl(t)} {_g(round(lvl))}%" + (" (offline)" if _offline(sn, t) else "")
+                     + (" LOW" if st.bat_low[t] else ""))
+    lowest = min(known, key=lambda t: (st.bat_level[t], t))
+    _last, nxt = report_times(st, cfg, now, tz)
+    plan.msgs.append(("battery_report", 0, "Battery levels: " + "; ".join(parts)
+                      + f". Lowest: {lbl(lowest)} at {_g(round(st.bat_level[lowest]))}%."
+                      + (f" Next report {_ddhm(nxt, tz)}." if nxt else "")))
 
 
 def _reminders(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[float]) -> None:
@@ -1038,6 +1495,15 @@ def next_wake(st: State, cfg: Cfg, sn: Snapshot, occ_next: list[float] | None = 
                 cands += [o - 1200, o - 600]
     if st.hot_since and not st.hot_alerted:
         cands.append(st.hot_since + HOT_FOR_S)
+    if st.off_wait and st.cycle >= 0:
+        cands.append(st.off_wait + max(cfg.off_wait_min, 1) * 60)
+    if cfg.off_ask_ahead and st.master and offline_blockers(st, cfg, sn):
+        cands += [o - AHEAD_S for i, o in enumerate(occ_next) if o > 0 and st.cycle_on[i]]
+    if any(st.bat_low):
+        cands += [t for t in (st.bat_next, st.bat_snooze_until) if t]
+    _last, rep_next = report_times(st, cfg, now, sn.tz)
+    if rep_next:
+        cands.append(rep_next)
     cands += [t for t in sn.bypass_until if t]
     if st.cycle >= 0:
         cands += [t for t in sn.people_clear_at if t]
@@ -1119,6 +1585,8 @@ def status(st: State, cfg: Cfg, sn: Snapshot | None) -> str:
     if st.mode == GAP and st.cycle >= 0:
         if held:
             return "held"
+        if st.off_wait:
+            return "offline"
         if st.people_wait:
             return "waiting"
         now = sn.now if sn else 0

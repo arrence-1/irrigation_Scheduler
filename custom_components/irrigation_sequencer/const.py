@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "irrigation_sequencer"
 NAME = "Irrigation Scheduler"
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.SENSOR, Platform.BINARY_SENSOR]
 
@@ -34,7 +34,7 @@ FORECAST_CACHE_S = 600
 
 EVENT_MESSAGE = f"{DOMAIN}_message"
 
-STATUS_OPTIONS = ["idle", "watering", "gap", "soaking", "waiting", "held", "manual", "stuck"]
+STATUS_OPTIONS = ["idle", "watering", "gap", "soaking", "waiting", "offline", "held", "manual", "stuck"]
 
 SERVICE_RUN_CYCLE = "run_cycle"
 SERVICE_STOP = "stop"
@@ -43,3 +43,6 @@ SERVICE_RUN_TAP = "run_tap"
 SERVICE_CLOSE_MAIN = "close_main_water"
 SERVICE_OPEN_MAIN = "open_main_water"
 SERVICE_SNOOZE_MAIN = "snooze_main_water_reminders"
+SERVICE_SKIP_OFFLINE = "skip_offline_tap"
+SERVICE_SNOOZE_BATTERY = "snooze_battery_warnings"
+SERVICE_BATTERY_REPORT = "send_battery_report"

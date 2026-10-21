@@ -23,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, UnitOfSpeed, UnitOfTemperature
 from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
@@ -57,14 +58,15 @@ _LOGGER = logging.getLogger(__name__)
 _REVS = itertools.count(int(time.time()))
 
 
-def parse_hours(text: Any) -> float | None:
-    """Snooze length typed on the phone: '3', '1.5', '2h', '90m', '90 min' -> hours (0-168), else None."""
+def parse_hours(text: Any, max_h: float = 168) -> float | None:
+    """Snooze length typed on the phone: '3', '1.5', '2h', '90m', '90 min', '3d', '2 days' -> hours, else None."""
     if not isinstance(text, str):
         return None
     s = text.strip().lower().replace(",", ".")
     mult = 1.0
     for suffix, m in (("minutes", 1 / 60), ("mins", 1 / 60), ("min", 1 / 60), ("m", 1 / 60),
-                      ("hours", 1.0), ("hrs", 1.0), ("hr", 1.0), ("h", 1.0)):
+                      ("hours", 1.0), ("hrs", 1.0), ("hr", 1.0), ("h", 1.0),
+                      ("days", 24.0), ("day", 24.0), ("d", 24.0), ("weeks", 168.0), ("week", 168.0), ("w", 168.0)):
         if s.endswith(suffix):
             s, mult = s[: -len(suffix)].strip(), m
             break
@@ -72,7 +74,7 @@ def parse_hours(text: Any) -> float | None:
         v = float(s) * mult
     except ValueError:
         return None
-    return v if 0 <= v <= 168 else None
+    return v if 0 <= v <= max_h else None
 
 
 def _float(state_str: Any) -> float | None:
@@ -113,6 +115,7 @@ class IrrigationCoordinator:
         self._idle = asyncio.Event()
         self._idle.set()
         self.next_wake: float | None = None
+        self.battery_ids: list[str] = []  # per tap: its valve's battery sensor ("" = none)
 
     # ------------------------------------------------------------------
     # Life cycle
@@ -181,8 +184,10 @@ class IrrigationCoordinator:
         self._entity_unsubs = []
         cfg = self.cfg
         ids: set[str] = set()
+        self.battery_ids = [self._find_battery(t.valve, t.battery) for t in cfg.taps]
         for t in cfg.taps:
             ids.update(x for x in [t.valve, t.bypass, *t.people] if x)
+        ids.update(x for x in self.battery_ids if x)
         ids.update(x for x in [cfg.rain_sensor, cfg.temp_sensor, cfg.main_valve] if x)
         if not cfg.temp_sensor and cfg.weather_entity:
             ids.add(cfg.weather_entity)
@@ -224,6 +229,21 @@ class IrrigationCoordinator:
                 self.request("action")
             else:
                 self.request("action", {"type": "snooze_main", "hours": hours})
+        elif action == f"{prefix}_offline_skip":
+            self.request("action", {"type": "skip_offline", "tap": -1, "skip": True})
+        elif action == f"{prefix}_offline_stop":
+            self.request("action", {"type": "stop_cycle"})
+        elif action == f"{prefix}_battery_snooze_24":
+            self.request("action", {"type": "snooze_battery", "hours": 24})
+        elif action == f"{prefix}_battery_snooze":
+            hours = parse_hours(event.data.get("reply_text"), max_h=720)
+            if hours is None:
+                self._startup_msgs.append(("battery_note", 0, f"Couldn't read \"{event.data.get('reply_text') or ''}\" "
+                                                              "as hours or days (try 12, 2d or 1 week); battery "
+                                                              "warnings are not snoozed."))
+                self.request("action")
+            else:
+                self.request("action", {"type": "snooze_battery", "hours": hours})
 
     # ------------------------------------------------------------------
     # Requests from entities, services, the card
@@ -477,6 +497,26 @@ class IrrigationCoordinator:
     # ------------------------------------------------------------------
     # Snapshot
     # ------------------------------------------------------------------
+    def _find_battery(self, valve: str, chosen: str) -> str:
+        """The battery sensor (%) for a valve: the one set in the tap's settings, else the one on its device."""
+        if chosen or not valve:
+            return chosen
+        reg = er.async_get(self.hass)
+        ent = reg.async_get(valve)
+        if ent is None or not ent.device_id:
+            return ""
+        found = []
+        for e in er.async_entries_for_device(reg, ent.device_id):
+            if e.domain != "sensor" or e.disabled_by:
+                continue
+            s = self.hass.states.get(e.entity_id)
+            dc = e.device_class or e.original_device_class or (s.attributes.get("device_class") if s else None)
+            unit = e.unit_of_measurement or (s.attributes.get("unit_of_measurement") if s else None)
+            if dc == "battery" and unit in ("%", None):
+                # the valve's own integration first (e.g. ZHA), before add-ons such as Battery Notes
+                found.append((e.platform != ent.platform, unit != "%", e.entity_id))
+        return min(found)[2] if found else ""
+
     def _state(self, entity_id: str):
         return self.hass.states.get(entity_id) if entity_id else None
 
@@ -581,6 +621,10 @@ class IrrigationCoordinator:
                 soil.append(None)
                 soil_bad.append(False)
 
+        battery = []
+        for i, t in enumerate(cfg.taps):
+            bid = self.battery_ids[i] if i < len(self.battery_ids) else ""
+            battery.append(self._num(bid) if t.valve and bid else None)
         seasonal_ext = self._num(cfg.seasonal_entity) if cfg.seasonal_entity else None
         main = E.V_NONE
         if cfg.main_valve:
@@ -597,7 +641,7 @@ class IrrigationCoordinator:
             rain_state=rain.state if rain else None, rain_value=_float(rain.state) if rain else None,
             weather_state=weather.state if weather else None, forecast=forecast,
             wind=self._wind_kmh(), temp=self._temp_c(), reasons=set(reasons), requests=list(requests),
-            main=main,
+            main=main, battery=battery,
         )
 
     async def _maybe_forecast(self, now: float, tz) -> dict[str, Any] | None:
@@ -686,6 +730,7 @@ class IrrigationCoordinator:
 
     def status_attributes(self) -> dict[str, Any]:
         st, cfg = self.state, self.cfg
+        sn = self.snapshot
         tz = dt_util.get_default_time_zone()
         nxt = self.next_tap()
 
@@ -709,6 +754,19 @@ class IrrigationCoordinator:
             "main_water": (self.snapshot.main if self.snapshot and cfg.main_valve else None),
             "main_snoozed_until": iso(st.main_snooze_until) if st.main_snooze_until > time.time() else None,
             "seasonal": st.seasonal,
+            # offline valves (tap numbers): offline now, skipped while offline, the ones a waiting cycle asks about
+            "offline": [i + 1 for i in range(len(cfg.taps)) if sn is not None and E._offline(sn, i)],
+            "offline_skipped": [i + 1 for i, s in enumerate(st.off_skip) if s],
+            "offline_can_skip": [i + 1 for i in range(len(cfg.taps)) if sn is not None and E._offline(sn, i)
+                                 and E.can_skip_offline(st, i)],
+            "offline_waiting": [i + 1 for i in st.off_asked] if st.off_wait else [],
+            "offline_until": iso(st.off_wait + max(cfg.off_wait_min, 1) * 60) if st.off_wait else None,
+            # valve batteries: last known % per tap number (None = no sensor), the low ones, snooze, next report
+            "battery": {str(i + 1): (round(v) if v >= 0 else None) for i, v in enumerate(st.bat_level)
+                        if cfg.taps[i].valve},
+            "battery_low": [i + 1 for i, low in enumerate(st.bat_low) if low],
+            "battery_snoozed_until": iso(st.bat_snooze_until) if st.bat_snooze_until > time.time() else None,
+            "battery_report_next": iso(E.report_times(st, cfg, time.time(), tz)[1]) if cfg.rep_on else None,
             "config_rev": self.config_rev,
             "last_message": self.messages[-1]["message"] if self.messages else None,
         }

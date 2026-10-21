@@ -81,18 +81,21 @@ disabling the integration.
 | `switch.irrigation_master` | Off = no scheduled cycles (manual runs still work, and still get their timer) |
 | `switch.irrigation_cycle_N` | Each cycle's own on/off (attributes: start time, days, minutes per tap, next start) |
 | `number.irrigation_seasonal_adjustment` | 0-200 % slider on every scheduled duration (0 % = cycles skipped) |
-| `sensor.irrigation_status` | idle / watering / gap / soaking / waiting (people) / held (bypass or main water off) / manual / stuck; attributes: cycle, tap, ends at, remaining per tap, waiting cycles, main water (on / off / offline), last message |
+| `sensor.irrigation_status` | idle / watering / gap / soaking / waiting (people) / offline (waiting: valve offline) / held (bypass or main water off) / manual / stuck; attributes: cycle, tap, ends at, remaining per tap, waiting cycles, main water (on / off / offline), offline / skipped valves, battery % per tap, low batteries, next battery report, last message |
 | `sensor.irrigation_next_cycle` | Next scheduled start (timestamp); attributes: cycle, master, reason (why there is none) |
 | `binary_sensor.irrigation_tap_N_blocked` | People guard is holding this tap back |
 
 ### Actions (services)
 `irrigation_sequencer.run_cycle` (cycle) · `irrigation_sequencer.stop` · `irrigation_sequencer.skip_tap` (tap) ·
 `irrigation_sequencer.run_tap` (tap, minutes) · `irrigation_sequencer.close_main_water` ·
-`irrigation_sequencer.open_main_water` · `irrigation_sequencer.snooze_main_water_reminders` (hours). *Run cycle* ignores the master / cycle switches and the weather
+`irrigation_sequencer.open_main_water` · `irrigation_sequencer.snooze_main_water_reminders` (hours) ·
+`irrigation_sequencer.skip_offline_tap` (tap, skip) · `irrigation_sequencer.snooze_battery_warnings` (hours) ·
+`irrigation_sequencer.send_battery_report`. *Run cycle* ignores the master / cycle switches and the weather
 and soil checks (it is an explicit "run it now").
 
 ### The dashboard card
-A taps x cycles grid: each cell shows minutes, run order (#) and cycle-and-soak (≈); **Off** cells are greyed.
+A taps x cycles grid: each cell shows minutes, run order (#) and cycle-and-soak (≈); **Off** cells are greyed and
+still show their run order faintly (the number is kept for when the tap gets minutes again).
 Tap a cell to edit minutes / run order / soak; tap a cycle header to edit its time and days; ▶ runs a cycle now.
 There is no Save button: each change saves by itself after a short pause (a few quick taps on + make one save),
 **Undo** puts back what it was when you opened it, **Done** closes the editor.
@@ -110,7 +113,10 @@ Live status, master switch, seasonal % (−/+), *Skip tap* and *Stop*. Editing n
   shows which tap has each number.
 * **⚙ Settings** (admins): every setting below, right on the card, with a link to the Irrigation page.
 * **Tap names are clickable:** run that tap now (1–30 min), stop or skip it while it runs, open the valve's
-  details, or jump to its settings.
+  details (with its battery %), skip it while its valve is offline, or open its settings (press *Tap settings*
+  again to hide them).
+* **Offline valve / low battery rows:** a valve that is offline shows a row with *Skip while offline* (tap twice);
+  low batteries show a row with *Snooze 12 h / 1 day / 3 days*.
 * **Next start:** each cycle header says when it runs next; the status line says how long until the next cycle,
   or why nothing is scheduled.
 
@@ -120,7 +126,8 @@ Live status, master switch, seasonal % (−/+), *Skip tap* and *Stop*. Editing n
 
 ### The Irrigation page (sidebar)
 **Irrigation** in the sidebar (admins): the grid on top and every setting below in tabs — Taps, General,
-Notifications, Cycle-and-soak, People guard, Rain & weather, Main water, Number of taps & cycles. Same labels, help and
+Notifications, Cycle-and-soak, People guard, Rain & weather, Main water, Offline valves, Batteries, Number of taps &
+cycles. Same labels, help and
 limits as the Configure screens. Changes save by themselves: a switch or a picker at once, a box you type in when
 you pause or leave it ("All changes saved" at the bottom). Only *Taps & cycles* has a Save button, because a new
 number of taps or cycles reloads the app. With more
@@ -135,7 +142,9 @@ One screen per group: **Cycles** (time, days, and per tap minutes / run order / 
 **Taps** (valve, name, people sensors, soil sensor + "wet enough at", bypass switch), **General** (gap 5 s,
 confirm timeout 30 s, safety limit 20 min, running-late 30 min, optional seasonal % entity), **Notifications**,
 **Cycle-and-soak** (burst 3 / soak 5 min), **People guard** (clear for 2 min, give up after 30 min, also stop
-manual runs), **Rain & weather skip**, **Number of taps and cycles** (up to 16 taps and 12 cycles).
+manual runs), **Rain & weather skip**, **Main water**, **Offline valves** (wait 30 min, then stop the cycle or skip
+the tap; ask 20 min ahead), **Valve batteries** (warn at 30 %, every 2 h, quiet 21:00-06:00; battery report every 14
+days at 10:00), **Number of taps and cycles** (up to 16 taps and 12 cycles).
 
 Good sensors to use:
 * Rain: a 24 h rain total in mm (better for skipping than a raining yes / no flag, which flickers in real rain).
@@ -160,8 +169,15 @@ Good sensors to use:
   2 min for the valves to come online.
 * **Safety.** No tap stays open longer than the safety limit in one go (longer taps run in parts). A tap that
   won't confirm off → *stuck*: nothing else opens (manual runs are closed again), retried every 5 min,
-  time-sensitive alert, and the cycle resumes once it reports off. A valve that won't report on is skipped. If
-  another valve is offline when the next tap should open, the cycle stops (it can't be confirmed off).
+  time-sensitive alert, and the cycle resumes once it reports off. A valve that won't report on is skipped.
+* **Offline valves** (*Offline valves* tab). No tap opens while another valve is offline (e.g. a flat battery),
+  because it can't be confirmed closed, even if that tap is Off in the cycle. The cycle waits and you get a
+  time-sensitive notification: press and hold for **Skip while offline** (needs Face ID / unlock) or **Stop the
+  cycle**. A skipped tap sits every cycle out until it reports back online, then it is in again by itself (if it
+  comes back reporting open it is closed at once). With no answer after 30 min (setting) the cycle stops, or, with
+  *With no answer: skip*, it skips the tap and carries on. You are also asked 20 min before a cycle, so the start
+  isn't held up. A valve **last seen open** is never skipped (it may still be running): that is the stuck-tap and
+  main water alert.
 * **Main water** (optional, *Main water* tab). Pick the valve that supplies every tap (switch, valve, toggle helper
   or light; on = water flowing). A tap stuck for the set time (default 10 min) raises a **critical** alert with a
   **Close main water** button (press and hold the notification); with *Close the main water automatically* on, the
@@ -170,6 +186,12 @@ Good sensors to use:
   off you get an **Open main water** button (phone unlocked), also on the card. While it is off you are **reminded
   every 30 min** (setting) with *Open main water*, *Snooze 1 h* and *Snooze…* (type the hours); the reminders start
   again when the snooze ends. 20 and 10 min before a cycle that would run you get a reminder too (even when snoozed).
+* **Valve batteries** (*Batteries* tab). Each tap's battery sensor is found on its valve's device (or set under the
+  tap). At or below 30 % (setting) you get a warning, repeated every 2 h until the batteries are changed (fine again
+  5 % above the level), never in the quiet time (21:00-06:00; held until it ends). Press and hold: *Snooze 1 day* or
+  *Snooze…* (type hours or days: 12, 2d, 1 week); a valve that gets low later still warns. The **battery report**
+  lists every valve's level every 14 days at 10:00 (pick the days, time and a first date; *Send report now* on the
+  Batteries tab or `send_battery_report`).
 * **Smart checks** at each cycle start: seasonal %, hot-day boost (≤ 250 % total), rain sensor / weather /
   forecast chance / forecast mm / wind / cold skips (one switch for all), soil per tap, people guard per tap.
 * **Bypass (pressure washer).** While a tap's bypass switch is on, that tap is left alone (no timer) and cycles
@@ -196,6 +218,9 @@ tag so a newer message replaces the older one; messages with the same tag in one
 | Tap won't close: close the main water? (**critical**, with **Close main water** button) / closed / open again (with **Open main water** button) | always (needs a main water valve) | `irrigation_main` |
 | Main water is off: every 30 min, with **Open main water**, **Snooze 1 h**, **Snooze…** (type hours) | *While it is off, remind me every* | `irrigation_main` |
 | Cycle N starts in 20 / 10 min but the main water is off (**Open main water** button; cleared later) | *Remind me before a cycle* | `irrigation_main_cycle_N` |
+| Valve offline: cycle waiting (time-sensitive, **Skip while offline** / **Stop the cycle**), asked 20 min ahead, skipped / back online | always | `irrigation_offline` |
+| Low battery, repeating (**Snooze 1 day**, **Snooze…** type hours or days) / snoozed / fine again | *Warn at or below* (0 = off) | `irrigation_battery` |
+| Battery report: every valve's level | *Battery report* | `irrigation_battery_report` |
 | Recovered after restart / reload | always | `irrigation_recovery` |
 | Settings warnings | always | `irrigation_config` |
 
@@ -218,11 +243,12 @@ Home Assistant).
 - [ ] Master off mid-cycle: tap closes, cycle cancelled; reminders 20 / 10 min before the next one; button works
 - [ ] Cycle-and-soak: other taps fill the soak time; seasonal 120 % / 0 %; weather skip; soil; people guard
 - [ ] Bypass on: Tap 1 left alone, cycles held, run late when it goes off
+- [ ] A valve offline at a cycle start: the cycle waits and asks; Skip while offline waters the rest; back online = in again
 Then swap in the real valves with short durations and watch one full cycle.
 
 ## Known limits
 * Disabled / removed integration = nothing closes taps (use the master switch; set the valves' own timers).
-* An offline valve stops a cycle when another tap would have to open (one-tap-at-a-time rule).
+* An offline valve holds every cycle until it is back, skipped, or the wait is over (one-tap-at-a-time rule).
 * Avoid start times in the daylight-saving change hour (02:00-03:00 on the change day).
 * Changing a running tap's valve entity closes the old valve; change valves while idle.
 

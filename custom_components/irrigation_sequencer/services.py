@@ -1,4 +1,4 @@
-"""Actions: run_cycle, stop, skip_tap, run_tap, close_main_water, open_main_water, snooze_main_water_reminders."""
+"""Actions: run_cycle, stop, skip_tap, run_tap, the main water, offline valves and valve batteries."""
 
 from __future__ import annotations
 
@@ -16,11 +16,14 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
+    SERVICE_BATTERY_REPORT,
     SERVICE_CLOSE_MAIN,
     SERVICE_OPEN_MAIN,
     SERVICE_RUN_CYCLE,
     SERVICE_RUN_TAP,
+    SERVICE_SKIP_OFFLINE,
     SERVICE_SKIP_TAP,
+    SERVICE_SNOOZE_BATTERY,
     SERVICE_SNOOZE_MAIN,
     SERVICE_STOP,
 )
@@ -38,6 +41,13 @@ SCHEMAS = {
     SERVICE_OPEN_MAIN: vol.Schema(BASE),
     SERVICE_SNOOZE_MAIN: vol.Schema({**BASE, vol.Required("hours"): vol.All(vol.Coerce(float), vol.Range(min=0, max=168))}),
     SERVICE_SKIP_TAP: vol.Schema({**BASE, vol.Required("tap"): vol.All(vol.Coerce(int), vol.Range(min=1, max=99))}),
+    SERVICE_SKIP_OFFLINE: vol.Schema({
+        **BASE,
+        vol.Required("tap"): vol.All(vol.Coerce(int), vol.Range(min=1, max=99)),
+        vol.Optional("skip", default=True): cv.boolean,
+    }),
+    SERVICE_SNOOZE_BATTERY: vol.Schema({**BASE, vol.Required("hours"): vol.All(vol.Coerce(float), vol.Range(min=0, max=720))}),
+    SERVICE_BATTERY_REPORT: vol.Schema(BASE),
     SERVICE_RUN_TAP: vol.Schema(
         {
             **BASE,
@@ -80,6 +90,17 @@ def async_register_services(hass: HomeAssistant) -> None:
             if c > C:
                 raise ServiceValidationError(f"There are only {C} cycles")
             coord.request("service", {"type": "run_cycle", "cycle": c - 1})
+        elif call.service == SERVICE_SKIP_OFFLINE:
+            t = call.data["tap"]
+            if t > T:
+                raise ServiceValidationError(f"There are only {T} taps")
+            if not coord.cfg.taps[t - 1].valve:
+                raise ServiceValidationError(f"Tap {t} has no valve")
+            coord.request("service", {"type": "skip_offline", "tap": t - 1, "skip": call.data["skip"]})
+        elif call.service == SERVICE_SNOOZE_BATTERY:
+            coord.request("service", {"type": "snooze_battery", "hours": call.data["hours"]})
+        elif call.service == SERVICE_BATTERY_REPORT:
+            coord.request("service", {"type": "battery_report"})
         elif call.service == SERVICE_SKIP_TAP:
             t = call.data["tap"]
             if t > T:

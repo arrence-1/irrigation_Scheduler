@@ -58,6 +58,8 @@
           "people": "People guard (cameras)",
           "weather": "Rain & weather skip",
           "main": "Main water: shut-off valve, tap-won't-close alert",
+          "offline": "Offline valves: wait, ask, skip while offline",
+          "battery": "Valve batteries: low warning, quiet time, battery report",
           "counts": "Number of taps and cycles"
         }
       },
@@ -302,7 +304,8 @@
           "people": "People sensors (cameras / zones)",
           "soil": "Soil moisture sensor",
           "soil_pct": "Wet enough at",
-          "bypass": "Bypass switch"
+          "bypass": "Bypass switch",
+          "battery": "Battery sensor"
         },
         "data_description": {
           "valve": "switch, valve or toggle helper. Leave empty if unused.",
@@ -310,7 +313,8 @@
           "people": "Optional. Person sensors covering the area this tap waters (Frigate person occupancy, person count). See People guard.",
           "soil": "Optional. A soil moisture sensor (%) in this tap's area. Leave empty for e.g. the lawn.",
           "soil_pct": "This tap sits a cycle out at or above this. 0 = off. Tip: note the reading a day after a good soak and set a little below it. Part of Rain & weather skip.",
-          "bypass": "Optional. While this is on (e.g. input_boolean.pressure_washer_bypass) the tap is left alone (no manual timer) and cycles wait until it is off."
+          "bypass": "Optional. While this is on (e.g. input_boolean.pressure_washer_bypass) the tap is left alone (no manual timer) and cycles wait until it is off.",
+          "battery": "Optional. Leave empty: the battery sensor (%) on the valve's own device is used. Pick one here only if that is wrong or missing. Used by Valve batteries."
         }
       },
       "general": {
@@ -418,6 +422,43 @@
           "remind_cycle": "20 and 10 min before a cycle that would run while the main water is off (also while snoozed)."
         }
       },
+      "offline": {
+        "title": "Offline valves",
+        "description": "No tap opens while another tap's valve is offline (e.g. a flat battery), because it can't be confirmed closed. The cycle waits and you get a notification: press and hold to Skip while offline (the tap sits every cycle out until it is back online; needs Face ID / unlock) or Stop the cycle. A valve last seen open is never skipped: that is the stuck-tap and main water alert.",
+        "data": {
+          "wait_min": "Wait for an answer",
+          "no_answer": "With no answer",
+          "ask_ahead": "Ask 20 min before a cycle"
+        },
+        "data_description": {
+          "wait_min": "How long a cycle waits for your answer (or for the valve to come back).",
+          "no_answer": "Stop the cycle (safest), or skip the offline tap and water the rest. A valve last seen open always stops the cycle.",
+          "ask_ahead": "If a valve is offline 20 min before a cycle would start, ask then, so the start isn't held up."
+        }
+      },
+      "battery": {
+        "title": "Valve batteries",
+        "description": "Uses each tap valve's battery sensor (found on the valve's device, or set under the tap). A warning comes when a battery is at or below the level and repeats until it is replaced (fine again 5 % above the level). Snooze it from the notification (press and hold: Snooze 1 day, or Snooze… and type hours or days, e.g. 12 or 3d). Separately, a battery report lists every valve's level on the days you choose.",
+        "data": {
+          "pct": "Warn at or below",
+          "remind_h": "Repeat the warning every",
+          "quiet_on": "Quiet time",
+          "quiet_from": "Quiet from",
+          "quiet_to": "Quiet until",
+          "report_on": "Battery report",
+          "report_days": "Report every",
+          "report_time": "Report time",
+          "report_start": "First report on"
+        },
+        "data_description": {
+          "pct": "0 = no low-battery warnings.",
+          "remind_h": "0 = warn once (again only when another valve gets low).",
+          "quiet_on": "No low-battery warnings between these times: one held back is sent when the quiet time ends. The battery report and the offline questions are not held.",
+          "report_days": "14 = every 2 weeks, 7 = weekly, 1 = daily.",
+          "report_time": "The report is sent at this time.",
+          "report_start": "Optional. The date of a report day (the next ones follow every 'Report every' days). Empty: from the day the report was switched on."
+        }
+      },
       "counts": {
         "title": "Number of taps and cycles",
         "description": "Changing these reloads the integration (the run in progress carries on).",
@@ -451,6 +492,7 @@
           "gap": "Between taps",
           "soaking": "Soaking",
           "waiting": "Waiting for people",
+          "offline": "Waiting: valve offline",
           "held": "Held (bypass on or main water off)",
           "manual": "Manual run",
           "stuck": "Stuck (valve not off)"
@@ -539,6 +581,48 @@
         }
       }
     },
+    "skip_offline_tap": {
+      "name": "Skip offline tap",
+      "description": "Skips a tap in every cycle while its valve is offline (it is included again by itself when back online), or includes it again. Not for a valve last seen open.",
+      "fields": {
+        "tap": {
+          "name": "Tap",
+          "description": "Tap number (1 = first)."
+        },
+        "skip": {
+          "name": "Skip",
+          "description": "On = skip while offline, off = include it again."
+        },
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Only needed when you have more than one."
+        }
+      }
+    },
+    "snooze_battery_warnings": {
+      "name": "Snooze battery warnings",
+      "description": "Pauses the low-battery warnings for the valves that are low now; a valve that gets low later still warns. They start again when the time is up.",
+      "fields": {
+        "hours": {
+          "name": "Hours",
+          "description": "How long (24 = a day). 0 = warn again now."
+        },
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Only needed when you have more than one."
+        }
+      }
+    },
+    "send_battery_report": {
+      "name": "Send battery report",
+      "description": "Sends the battery report (every tap valve's battery level) now.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Only needed when you have more than one."
+        }
+      }
+    },
     "run_tap": {
       "name": "Run tap",
       "description": "Opens one tap as a manual run (any other open tap closes; a running cycle pauses).",
@@ -555,6 +639,14 @@
           "name": "Integration entry",
           "description": "Only needed when you have more than one."
         }
+      }
+    }
+  },
+  "selector": {
+    "no_answer": {
+      "options": {
+        "stop": "Stop the cycle",
+        "skip": "Skip the offline tap and carry on"
       }
     }
   }

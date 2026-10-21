@@ -34,16 +34,25 @@ TITLES = {
     "rain": "Raining",
     "main": "Main water",
     "main_cycle": "Cycle {n}: main water off",
+    "offline": "Valve offline",
+    "battery": "Low battery",
+    "battery_report": "Battery levels",
 }
 NUMBERED = ("cycle", "reminder", "tap", "people", "main_cycle")
 # main water messages share one tag, so each replaces the one before (alert -> closed -> reminders -> open again)
 MAIN_KINDS = ("main", "main_alert", "main_auto", "main_open", "main_remind", "main_remind_stuck")
+# offline valve messages share one tag too (question 20 min ahead -> question at the start -> skipped / back online)
+OFFLINE_KINDS = ("offline", "offline_open", "offline_ahead", "offline_note")
+BATTERY_KINDS = ("battery", "battery_note")
+GROUPED = {**dict.fromkeys(MAIN_KINDS, "main"), **dict.fromkeys(OFFLINE_KINDS, "offline"),
+           **dict.fromkeys(BATTERY_KINDS, "battery")}
 # iOS: a critical alert sounds even on silent / Do Not Disturb (the Companion app asks for this permission)
 CRITICAL = ("main_alert", "main_auto")
-TIME_SENSITIVE = ("tap", "main", "main_open", "main_remind", "main_remind_stuck", "main_cycle")
+TIME_SENSITIVE = ("tap", "main", "main_open", "main_remind", "main_remind_stuck", "main_cycle",
+                  "offline", "offline_open", "offline_ahead")
 
 
-def _main_buttons(prefix: str, kind: str) -> list[dict[str, Any]]:
+def _buttons(prefix: str, kind: str) -> list[dict[str, Any]]:
     """iOS shows these when you press and hold the notification."""
     opener = {"action": f"{prefix}_main_open", "title": "Open main water", "authenticationRequired": True}
     snooze = [
@@ -59,11 +68,24 @@ def _main_buttons(prefix: str, kind: str) -> list[dict[str, Any]]:
         return snooze
     if kind == "main_cycle":
         return [opener]
+    # an offline valve: skipping it relaxes the one-tap-at-a-time check, so the phone must be unlocked
+    skip = {"action": f"{prefix}_offline_skip", "title": "Skip while offline", "authenticationRequired": True}
+    stop = {"action": f"{prefix}_offline_stop", "title": "Stop the cycle", "destructive": True}
+    if kind == "offline":
+        return [skip, stop]
+    if kind == "offline_open":
+        return [stop]
+    if kind == "offline_ahead":
+        return [skip]
+    if kind == "battery":
+        return [{"action": f"{prefix}_battery_snooze_24", "title": "Snooze 1 day"},
+                {"action": f"{prefix}_battery_snooze", "title": "Snooze…", "behavior": "textInput",
+                 "textInputButtonTitle": "Snooze", "textInputPlaceholder": "Hours or days, e.g. 12 or 3d"}]
     return []
 
 
 def tag_for(prefix: str, kind: str, n: int) -> str:
-    kind = "cycle" if kind == "skip" else ("main" if kind in MAIN_KINDS else kind)
+    kind = "cycle" if kind == "skip" else GROUPED.get(kind, kind)
     return f"{prefix}_{kind}" + (f"_{n}" if kind in NUMBERED else "")
 
 
@@ -91,15 +113,19 @@ def build_outbox(cfg: Cfg, msgs: list[tuple[str, int, str]], master_on: bool) ->
         if not allow.get(kind, True):
             continue
         tag = tag_for(prefix, kind, n)
-        if tag in out:
+        if tag in out:  # merged: keep the buttons and the alert level of the message that has them
             out[tag]["message"] += " " + text
+            data = out[tag]["data"]
+            if "actions" not in data and (buttons := _buttons(prefix, kind)):
+                data["actions"] = buttons
+                data["push"] = _push(prefix, kind)
             continue
         data: dict[str, Any] = {"group": prefix, "tag": tag, "push": _push(prefix, kind)}
         if kind in ("reminder", "hot") and not master_on:
             data["actions"] = [{"action": f"{prefix}_master_on", "title": "Turn master switch on"}]
-        elif buttons := _main_buttons(prefix, kind):
+        elif buttons := _buttons(prefix, kind):
             data["actions"] = buttons
-        title_kind = "main" if kind in MAIN_KINDS else kind
+        title_kind = GROUPED.get(kind, kind)
         out[tag] = {
             "title": f"{title_prefix} - " + TITLES.get(title_kind, title_kind.title()).format(n=n),
             "message": text,

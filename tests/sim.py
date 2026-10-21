@@ -64,6 +64,7 @@ class World:
     down: bool = False  # Home Assistant is "down": nothing runs
     events: list[tuple[float, callable]] = field(default_factory=list)
     main: Valve | None = None  # the main water valve (made "on" when the options set one)
+    battery: list[float | None] = field(default_factory=list)  # % per tap (None = no sensor)
 
     def __post_init__(self) -> None:
         self.options = normalize(self.options)
@@ -76,6 +77,7 @@ class World:
         self.bypass = self.bypass or [False] * T
         self.soil = self.soil or [None] * T
         self.soil_bad = self.soil_bad or [False] * T
+        self.battery = self.battery or [None] * T
         if self.main is None and self.cfg.main_valve:
             self.main = Valve(state="on")
         self.state.master = True
@@ -100,7 +102,7 @@ class World:
             soil=list(self.soil), soil_bad=list(self.soil_bad), seasonal_ext=self.seasonal_ext,
             rain_state=self.rain_state, rain_value=self.rain_value, weather_state=self.weather_state,
             forecast=self.forecast, wind=self.wind, temp=self.temp, reasons=set(reasons),
-            requests=list(requests or []),
+            requests=list(requests or []), battery=list(self.battery),
             main=(E.V_NONE if not self.cfg.main_valve or self.main is None
                   else {"on": E.V_ON, "off": E.V_OFF}.get(self.main.state, E.V_OFFLINE)),
         )
@@ -221,6 +223,19 @@ class World:
         def fn(w: World):
             w._set_valve(i, "off")
             return {"valve"}
+        return fn
+
+    def valve_to(self, i: int, state: str):
+        """A valve changes by itself: on / off / offline (e.g. a flat battery)."""
+        def fn(w: World):
+            w._set_valve(i, state)
+            return {"valve"}
+        return fn
+
+    def battery_to(self, levels: list[float | None]):
+        def fn(w: World):
+            w.battery = list(levels)
+            return {"entity"}
         return fn
 
     def request(self, req: dict):

@@ -18,9 +18,11 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 from .model import (
     DAYS,
+    DEFAULT_BATTERY,
     DEFAULT_GENERAL,
     DEFAULT_MAIN,
     DEFAULT_NOTIFY,
+    DEFAULT_OFFLINE,
     DEFAULT_PEOPLE,
     DEFAULT_SOAK,
     DEFAULT_TAP,
@@ -48,6 +50,7 @@ def _entity_ids(hass: HomeAssistant, entry_id: str) -> dict[str, str]:
 def describe(hass: HomeAssistant, entry) -> dict[str, Any]:
     o = normalize(entry.options)  # the entry is the source of truth (the live copy may lag a moment)
     ids = _entity_ids(hass, entry.entry_id)
+    bats = getattr(getattr(entry, "runtime_data", None), "battery_ids", None) or []
     return {
         "entry_id": entry.entry_id,
         "title": entry.title,
@@ -55,9 +58,12 @@ def describe(hass: HomeAssistant, entry) -> dict[str, Any]:
         "config_rev": getattr(getattr(entry, "runtime_data", None), "config_rev", 0),
         "max_run_min": o["general"]["max_run_min"],
         "main_valve": o["main"]["valve"],  # the main water valve (empty = not set)
+        "offline_wait_min": o["offline"]["wait_min"],
+        "battery_pct": o["battery"]["pct"],
         "taps": [
             {"n": i + 1, "label": f"Tap {i + 1} ({t['name']})" if t["name"] else f"Tap {i + 1}",
              "name": t["name"], "valve": t["valve"],
+             "battery": bats[i] if i < len(bats) else "",  # its valve's battery sensor ("" = none found)
              "blocked_entity": ids.get(f"tap_{i + 1}_blocked")}
             for i, t in enumerate(o["taps"])
         ],
@@ -82,6 +88,8 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "people": tuple(DEFAULT_PEOPLE),
     "weather": tuple(DEFAULT_WEATHER),
     "main": tuple(DEFAULT_MAIN),
+    "offline": tuple(DEFAULT_OFFLINE),
+    "battery": tuple(DEFAULT_BATTERY),
     "tap": tuple(DEFAULT_TAP),
     "counts": ("tap_count", "cycle_count"),
 }

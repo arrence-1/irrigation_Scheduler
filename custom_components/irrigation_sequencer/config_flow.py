@@ -15,6 +15,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    DateSelector,
     DeviceSelector,
     DeviceSelectorConfig,
     EntitySelector,
@@ -31,7 +32,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import DOMAIN
-from .model import DAYS, MAX_CYCLES, MAX_MINUTES, MAX_TAPS, default_options, normalize, resolve_order
+from .model import DAYS, MAX_CYCLES, MAX_MINUTES, MAX_TAPS, NO_ANSWER, default_options, normalize, resolve_order
 
 DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 VALVE_DOMAINS = ["switch", "valve", "input_boolean"]
@@ -131,7 +132,7 @@ class IrrigationOptionsFlow(OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options=["cycle_pick", "tap_pick", "general", "notifications", "soak", "people", "weather", "main",
-                          "counts"],
+                          "offline", "battery", "counts"],
         )
 
     # ---------------- cycles ----------------
@@ -232,7 +233,7 @@ class IrrigationOptionsFlow(OptionsFlow):
         o = self._opts
         i = self._tap
         if user_input is not None:
-            u = _clean(user_input, ["valve", "name", "soil", "bypass"])
+            u = _clean(user_input, ["valve", "name", "soil", "bypass", "battery"])
             u.setdefault("people", [])
             o["taps"][i].update(u)
             return self._save(o)
@@ -244,6 +245,7 @@ class IrrigationOptionsFlow(OptionsFlow):
                 vol.Optional("soil"): _entity("sensor"),
                 vol.Required("soil_pct"): _num(0, 100, 1, "%"),
                 vol.Optional("bypass"): _entity(["input_boolean", "switch", "binary_sensor"]),
+                vol.Optional("battery"): _entity("sensor"),
             }
         )
         t = o["taps"][i]
@@ -358,6 +360,46 @@ class IrrigationOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="main", data_schema=self.add_suggested_values_to_schema(
             schema, {k: v for k, v in o["main"].items() if v != ""}))
+
+    async def async_step_offline(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        o = self._opts
+        if user_input is not None:
+            o["offline"].update(user_input)
+            return self._save(o)
+        schema = vol.Schema(
+            {
+                vol.Required("wait_min"): _num(1, 240, 1, "min"),
+                vol.Required("no_answer"): SelectSelector(SelectSelectorConfig(
+                    options=list(NO_ANSWER), translation_key="no_answer", mode=SelectSelectorMode.DROPDOWN)),
+                vol.Required("ask_ahead"): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(step_id="offline", data_schema=self.add_suggested_values_to_schema(
+            schema, o["offline"]))
+
+    async def async_step_battery(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        o = self._opts
+        if user_input is not None:
+            o["battery"].update(_clean(user_input, ["report_start"]))
+            return self._save(o)
+        schema = vol.Schema(
+            {
+                vol.Required("pct"): _num(0, 100, 1, "%"),
+                vol.Required("remind_h"): _num(0, 48, 0.5, "h"),
+                vol.Required("quiet_on"): BooleanSelector(),
+                vol.Required("quiet_from"): TimeSelector(),
+                vol.Required("quiet_to"): TimeSelector(),
+                vol.Required("report_on"): BooleanSelector(),
+                vol.Required("report_days"): _num(1, 90, 1, "days"),
+                vol.Required("report_time"): TimeSelector(),
+                vol.Optional("report_start"): DateSelector(),
+            }
+        )
+        b = o["battery"]
+        shown = {**b, "quiet_from": f"{b['quiet_from']}:00", "quiet_to": f"{b['quiet_to']}:00",
+                 "report_time": f"{b['report_time']}:00"}
+        return self.async_show_form(step_id="battery", data_schema=self.add_suggested_values_to_schema(
+            schema, {k: v for k, v in shown.items() if v != ""}))
 
     async def async_step_counts(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         o = self._opts

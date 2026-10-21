@@ -691,13 +691,22 @@ def test_valve_offline_while_open_goes_stuck():
     assert_never_two(w)
 
 
-def test_other_valve_offline_when_next_tap_should_open_stops_cycle():
+def test_other_valve_offline_holds_cycle_asks_then_stops_after_the_wait():
+    # tap 3 is Off in this cycle, but an offline valve can't be confirmed closed: nothing opens
     o = cyc(opts(3, 1), 0, "06:00", [1, 1, 0])
     w = world(o, f"{DAY} 05:50")
     w.valves[2].state = "offline"
-    w.run_until(f"{DAY} 06:30")
+    w.reconcile({"valve"})
+    w.run_until(f"{DAY} 06:31")
     assert w.log == []
-    assert any("Cycle 1 stopped: cannot confirm Tap 3 is off" in t for t in w.texts("tap"))
+    ahead = w.texts("offline_ahead")
+    assert len(ahead) == 1 and "Cycle 1 starts at 06:00 (in 10 min) but Tap 3 has been offline since 05:50 (last seen closed)." in ahead[0]
+    asks = w.texts("offline")
+    assert len(asks) == 1 and asks[0].startswith("Cycle 1 is waiting: Tap 3 has been offline since 05:50 (last seen closed). No tap opens")
+    assert "With no answer by 06:30 the cycle stops." in asks[0]
+    assert any("Cycle 1 stopped at 06:30: Tap 3 is still offline and there was no answer after 30 min" in t
+               for t in w.texts("offline_note")), w.dump()
+    assert w.state.cycle == -1 and w.state.mode == E.IDLE
 
 
 def test_valve_that_wont_report_on_is_skipped():
@@ -1064,3 +1073,240 @@ def test_main_reminder_while_a_tap_is_stuck_offers_no_open_button_and_open_by_ap
     w.run_until(f"{DAY} 07:00")
     assert w.main.state == "on" and (ts(f"{DAY} 06:45"), "main") not in w.clears
     assert any(x[1] == "main_remind" and x[0] == "06:36:00" for x in kinds(w)), kinds(w)
+
+
+# --------------------------------------------------------------------------
+# Offline valves: ask, skip while offline, stop / skip after the wait
+# --------------------------------------------------------------------------
+NO_AHEAD = {"ask_ahead": False}
+
+
+def test_offline_ahead_question_skip_runs_the_rest_and_back_online_includes_it_again():
+    o = cyc(opts(3, 1), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 05:30")
+    w.at(f"{DAY} 05:35", w.valve_to(1, "offline"))
+    w.at(f"{DAY} 05:45", w.request({"type": "skip_offline", "tap": -1}))
+    w.at(f"{DAY} 07:00", w.valve_to(1, "off"))
+    w.run_until(f"{DAY} 07:05")
+    m = kinds(w, "offline")
+    assert m[0][:2] == ("05:40:00", "offline_ahead"), m
+    assert "Cycle 1 starts at 06:00 (in 20 min) but Tap 2 has been offline since 05:35 (last seen closed). Press" in m[0][2]
+    assert m[1] == ("05:45:00", "offline_note", "Tap 2 is skipped in every cycle while it is offline; it is "
+                                                "included again when it is back online.")
+    assert w.order() == ["T1", "T3"] and w.on_periods(0)[0][0] == ts(f"{DAY} 06:00")
+    assert "Skipped while offline: Tap 2." in w.texts("skip")
+    assert m[-1] == ("07:00:00", "offline_note", "Tap 2 is back online: it is in the cycles again."), m
+    assert w.state.off_skip == [False, False, False]
+    assert not w.texts("offline")  # the cycle never had to wait
+    assert_never_two(w)
+
+
+def test_offline_wait_skip_from_the_notification_carries_on():
+    o = cyc(opts(3, 1, offline=NO_AHEAD), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 05:55", w.valve_to(2, "offline"))
+    w.run_until(f"{DAY} 06:05")
+    assert E.status(w.state, w.cfg, w.snapshot(set())) == "offline"
+    assert w.log[-1][1] == "T3 offline" and len(w.texts("offline")) == 1
+    w.at(f"{DAY} 06:10", w.request({"type": "skip_offline", "tap": -1}))
+    w.run_until(f"{DAY} 06:20")
+    assert w.on_periods(0)[0][0] == ts(f"{DAY} 06:10") and w.order() == ["T1", "T2"]
+    notes = [x[2] for x in kinds(w, "offline_note")]
+    assert notes[:2] == ["Tap 3 is skipped in every cycle while it is offline; it is included again when it is back "
+                         "online.", "Cycle 1 carries on at 06:10."], notes
+    assert w.state.off_shown is False and (ts(f"{DAY} 06:10"), "offline") not in w.clears
+    assert_never_two(w)
+
+
+def test_offline_valve_back_online_during_the_wait_carries_on_with_it():
+    o = cyc(opts(3, 1, offline=NO_AHEAD), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 05:55", w.valve_to(2, "offline"))
+    w.at(f"{DAY} 06:07", w.valve_to(2, "off"))
+    w.run_until(f"{DAY} 06:20")
+    assert w.order() == ["T1", "T2", "T3"] and w.on_periods(0)[0][0] == ts(f"{DAY} 06:07")
+    assert [x[2] for x in kinds(w, "offline_note")] == ["Tap 3 is back online.", "Cycle 1 carries on at 06:07."]
+
+
+def test_offline_no_answer_skip_setting_skips_and_carries_on():
+    o = cyc(opts(3, 1, offline={**NO_AHEAD, "no_answer": "skip", "wait_min": 15}), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 05:55", w.valve_to(1, "offline"))
+    w.run_until(f"{DAY} 06:30")
+    ask = w.texts("offline")
+    assert len(ask) == 1 and "With no answer by 06:15 the cycle skips it and carries on." in ask[0]
+    assert ("No answer after 15 min: Tap 2 is skipped while offline. Cycle 1 carries on at 06:15. Included again "
+            "when back online.") in w.texts("offline_note")
+    assert w.order() == ["T1", "T3"] and w.on_periods(0)[0][0] == ts(f"{DAY} 06:15")
+    assert w.state.off_skip[1] is True
+
+
+def test_offline_valve_last_seen_open_cant_be_skipped_and_the_cycle_stops():
+    o = cyc(opts(3, 1, offline={**NO_AHEAD, "no_answer": "skip"}, main={"valve": "light.main"}), 0, "06:00",
+            [1, 1, 1])
+    w = world(o, f"{DAY} 05:50")
+
+    def drops_off_open(w):
+        w._set_valve(2, "offline")
+        w.state.off_seen[2] = "on"  # e.g. it was open when it dropped off
+        return {"valve"}
+
+    w.at(f"{DAY} 05:55", drops_off_open)
+    w.at(f"{DAY} 06:05", w.request({"type": "skip_offline", "tap": 2}))
+    w.run_until(f"{DAY} 06:40")
+    opn = w.texts("offline_open")
+    assert "It was last seen open and may still be running, so it can't be skipped: check it, or close the main " \
+           "water." in opn[0] and "With no answer by 06:30 the cycle stops." in opn[0]
+    assert opn[1] == ("Tap 3 was last seen open and may still be running, so it can't be skipped: check it, or close "
+                      "the main water.")
+    assert any("Cycle 1 stopped at 06:30" in t and "It was last seen open, so it is not skipped." in t
+               for t in w.texts("offline_note"))
+    assert w.log == [(ts(f"{DAY} 05:55"), "T3 offline")] and w.state.off_skip[2] is False
+
+
+def test_skipped_valve_back_online_but_open_is_closed_straight_away():
+    o = cyc(opts(3, 1), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 08:00")
+    w.at(f"{DAY} 08:01", w.valve_to(1, "offline"))
+    w.at(f"{DAY} 08:02", w.request({"type": "skip_offline", "tap": 1}))
+    w.at(f"{DAY} 09:00", w.valve_to(1, "on"))
+    w.run_until(f"{DAY} 09:05")
+    assert w.log[-2:] == [(ts(f"{DAY} 09:00"), "T2 on"), (ts(f"{DAY} 09:00"), "T2 off")], w.log
+    assert ("Tap 2 is back online but reports open, so it was closed. It is in the cycles again."
+            in w.texts("offline_note"))
+    assert not w.texts("manual")  # not taken as a manual run
+
+
+def test_offline_stop_button_stops_only_the_waiting_cycle_and_include_again():
+    o = cyc(opts(3, 1, offline=NO_AHEAD), 0, "06:00", [1, 1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 05:55", w.valve_to(0, "offline"))
+    w.at(f"{DAY} 06:05", w.request({"type": "stop_cycle"}))
+    w.run_until(f"{DAY} 06:10")
+    assert "Cycle 1 stopped at 06:05 (requested)." in w.texts("offline_note")
+    assert w.state.cycle == -1 and w.log == [(ts(f"{DAY} 05:55"), "T1 offline")]
+    w.at(f"{DAY} 06:11", w.request({"type": "skip_offline", "tap": 0}))
+    w.at(f"{DAY} 06:12", w.request({"type": "skip_offline", "tap": 0, "skip": False}))
+    w.at(f"{DAY} 06:13", w.request({"type": "skip_offline", "tap": 1}))
+    w.run_until(f"{DAY} 06:15")
+    notes = w.texts("offline_note")
+    assert notes[-2:] == ["Tap 1 is in the cycles again. It is still offline, so cycles wait for it (you'll be "
+                          "asked).", "Tap 2 is online: there is nothing to skip."], notes
+    assert w.state.off_skip == [False, False, False]
+
+
+def test_offline_question_cleared_when_the_valve_is_back_and_nothing_waits():
+    o = cyc(opts(2, 1), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:30")
+    w.at(f"{DAY} 05:35", w.valve_to(1, "offline"))
+    w.run_until(f"{DAY} 05:41")
+    assert w.state.off_shown and w.state.off_asked == [1]
+    w.state.off_asked = []  # e.g. asked about by an older version: no "back online" note, just tidy up
+    w.at(f"{DAY} 05:45", w.valve_to(1, "off"))
+    w.run_until(f"{DAY} 05:50")
+    assert (ts(f"{DAY} 05:45"), "offline") in w.clears and not w.state.off_shown
+
+
+def test_saved_state_from_before_offline_and_battery_loads():
+    old = E.State().to_dict()
+    for k in [k for k in old if k.startswith(("off_", "bat_", "rep_"))]:
+        del old[k]
+    st, ok = E.State.from_dict(old)
+    assert ok and st.off_skip == [] and st.bat_next == 0.0 and st.rep_anchor == ""
+
+
+# --------------------------------------------------------------------------
+# Valve batteries: warning, repeat, quiet time, snooze, report
+# --------------------------------------------------------------------------
+def bat_times(w: World, kind: str = "battery") -> list[str]:
+    return [x[0] for x in kinds(w, kind) if x[1] == kind]
+
+
+def test_battery_warning_repeats_every_2_h_but_not_in_the_quiet_time():
+    o = opts(3, 1, battery={"report_on": False})
+    w = world(o, f"{DAY} 17:59")
+    w.at(f"{DAY} 18:00", w.battery_to([80.0, 25.0, None]))
+    w.run_until("2026-10-13 08:30")
+    assert bat_times(w) == ["18:00:00", "20:00:00", "06:00:00", "08:00:00"], kinds(w, "battery")
+    first = w.texts("battery")[0]
+    assert first == ("Low battery (warning at 30%): Tap 2 25%. Replace the batteries soon: an offline valve makes the "
+                     "cycles wait. Repeats every 2 h (not 21:00-06:00); press and hold to snooze.")
+
+
+def test_battery_snooze_new_low_tap_breaks_through_fine_again_stops_it():
+    o = opts(3, 1, battery={"report_on": False, "quiet_on": False})
+    w = world(o, f"{DAY} 11:59")
+    w.at(f"{DAY} 12:00", w.battery_to([80.0, 25.0, None]))
+    w.at(f"{DAY} 12:30", w.request({"type": "snooze_battery", "hours": 24}))
+    w.at(f"{DAY} 13:00", w.battery_to([20.0, 25.0, None]))
+    w.at(f"{DAY} 15:30", w.battery_to([100.0, 32.0, None]))  # tap 2 at 32: still low (fine again from 35)
+    w.at(f"{DAY} 16:00", w.battery_to([100.0, 99.0, None]))
+    w.run_until(f"{DAY} 20:00")
+    assert bat_times(w) == ["12:00:00", "13:00:00", "15:00:00"], kinds(w, "battery")
+    notes = w.texts("battery_note")
+    assert notes == ["Battery warnings snoozed for 1 day, until Tue 13 Oct 12:30. Still low: Tap 2.",
+                     "Battery fine again: Tap 1 100%.", "Battery fine again: Tap 2 99%."], notes
+    assert "Tap 1 20%; Tap 2 25%" in w.texts("battery")[1]
+    assert w.state.bat_low == [False, False, False] and w.state.bat_snooze_until == 0.0
+
+
+def test_battery_warning_once_when_repeat_is_0_and_off_at_0_pct():
+    o = opts(2, 1, battery={"report_on": False, "remind_h": 0})
+    w = world(o, f"{DAY} 08:00")
+    w.at(f"{DAY} 08:01", w.battery_to([10.0, None]))
+    w.run_until(f"{DAY} 14:00")
+    assert bat_times(w) == ["08:01:00"] and "Repeats" not in w.texts("battery")[0]
+    w.set_options(opts(2, 1, battery={"report_on": False, "pct": 0}))
+    w.run_until(f"{DAY} 14:02")
+    assert (ts(f"{DAY} 14:00"), "battery") in w.clears or any(c == "battery" for _t, c in w.clears)
+    assert w.state.bat_low == [False, False]
+
+
+def test_battery_report_every_14_days_from_the_first_day_and_on_request():
+    o = opts(3, 1)
+    w = world(o, f"{DAY} 05:00")  # the report counts from today: first one at 10:00 today
+    w.battery = [61.0, 50.0, None]
+    w.run_until(f"{DAY} 10:01")
+    assert w.texts("battery_report") == ["Battery levels: Tap 1 61%; Tap 2 50%; Tap 3: no battery reading. Lowest: "
+                                         "Tap 2 at 50%. Next report Mon 26 Oct 10:00."]
+    assert E.report_times(w.state, w.cfg, w.now, w.snapshot(set()).tz)[1] == ts("2026-10-26 10:00")
+    w.at(f"{DAY} 12:00", w.request({"type": "battery_report"}))
+    w.run_until(f"{DAY} 12:01")
+    assert len(w.texts("battery_report")) == 2
+
+
+def test_battery_report_start_date_and_changes_dont_send_for_the_past():
+    o = opts(2, 1, battery={"report_time": "09:30"})
+    w = world(o, f"{DAY} 12:00")  # 09:30 today has passed: counts as done
+    w.battery = [61.0, 70.0]
+    w.run_until(f"{DAY} 12:05")
+    assert not w.texts("battery_report")
+    w.set_options(opts(2, 1, battery={"report_time": "08:00", "report_days": 7, "report_start": "2026-10-14"}))
+    w.run_until("2026-10-14 08:01")
+    assert [hms(t) for t, k, _n, _x in w.msgs if k == "battery_report"] == ["08:00:00"]
+    assert w.texts("battery_report")[0].endswith("Next report Wed 21 Oct 08:00.")
+    w.set_options(opts(2, 1, battery={"report_on": False}))
+    w.run_until("2026-10-21 08:01")
+    assert len(w.texts("battery_report")) == 1
+
+
+def test_battery_report_on_request_without_sensors_says_so():
+    w = world(opts(2, 1), f"{DAY} 12:00")
+    w.at(f"{DAY} 12:01", w.request({"type": "battery_report"}))
+    w.run_until(f"{DAY} 12:02")
+    assert w.texts("battery_report") == ["No battery levels to report: none of the tap valves has a battery sensor "
+                                         "(set one under the tap's settings)."]
+
+
+def test_offline_question_shows_the_last_battery_level():
+    o = cyc(opts(2, 1, offline=NO_AHEAD, battery={"report_on": False}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 05:51", w.battery_to([12.0, 90.0]))
+    w.at(f"{DAY} 05:52", w.valve_to(0, "offline"))
+    w.at(f"{DAY} 05:52", w.battery_to([None, 90.0]))  # its battery sensor goes unavailable too
+    w.run_until(f"{DAY} 06:01")
+    assert ("Tap 1 has been offline since 05:52 (last seen closed; battery 12% then)" in w.texts("offline")[0])
+    # low at 05:51, inside the quiet time (21:00-06:00): the warning waits until 06:00
+    assert bat_times(w) == ["06:00:00"]
+    assert w.texts("battery")[0].startswith("Low battery (warning at 30%): Tap 1 12% (offline). ")
+    assert w.state.bat_level[0] == 12.0  # kept while its sensor is unavailable

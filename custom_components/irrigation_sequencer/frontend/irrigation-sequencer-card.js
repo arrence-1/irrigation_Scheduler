@@ -5,13 +5,13 @@
  * Live status, master switch, seasonal %, run / stop buttons.
  * Served by the irrigation_sequencer integration (no build step, no dependencies).
  */
-const CARD_VERSION = "1.4.0";
+const CARD_VERSION = "1.5.0";
 const DOMAIN = "irrigation_sequencer";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_SHORT = ["M", "T", "W", "T", "F", "S", "S"];
 const STATUS_TEXT = {
   idle: "Idle", watering: "Watering", gap: "Between taps", soaking: "Soaking",
-  waiting: "Waiting for people", held: "Held", manual: "Manual run", stuck: "Stuck",
+  waiting: "Waiting for people", offline: "Waiting: valve offline", held: "Held", manual: "Manual run", stuck: "Stuck",
 };
 const QUICK = [0, 1, 2, 3, 5, 10, 15, 20, 30];
 
@@ -32,6 +32,12 @@ const dayWord = (iso) => { // "today" / "tomorrow" / "Mon"
   if (ymd(d) === ymd(now)) return "today";
   if (ymd(d) === ymd(new Date(now.getTime() + 86400000))) return "tomorrow";
   return weekday(iso);
+};
+const dateText = (iso) => { // "Mon 26 Oct 10:00"
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const part = (o) => d.toLocaleDateString([], { ...o, timeZone: TZ });
+  return `${weekday(iso)} ${part({ day: "numeric" })} ${part({ month: "short" })} ${hhmm(iso)}`; // day before month, any locale
 };
 const inText = (iso) => { // "in 45 min" / "in 2 h 5 min" / "in 3 days"
   const min = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
@@ -286,7 +292,7 @@ class IrrigationSchedulerCard extends HTMLElement {
     }
     if (runC && master && master.state === "off") line += " · master switch off";
     const pending = (a.pending || []).map((p) => `C${p.cycle}`).join(", ");
-    const mainRow = this._mainRow(state, a);
+    const mainRow = this._mainRow(state, a) + this._offlineRow(state, a) + this._batteryRow(a);
 
     // Colours: the cycle in progress (blue) and what is about to run (amber).
     const remain = a.remaining_min || {};
@@ -338,6 +344,8 @@ class IrrigationSchedulerCard extends HTMLElement {
       const vBad = v && ["unavailable", "unknown"].includes(v.state);
       const blocked = this._st(t.blocked_entity);
       const people = blocked && blocked.state === "on";
+      const offNote = (a.offline_skipped || []).includes(t.n) ? " · offline, skipped" : (a.offline || []).includes(t.n) ? " · offline" : "";
+      const batNote = (a.battery_low || []).includes(t.n) && a.battery && a.battery[t.n] != null ? ` · battery ${a.battery[t.n]}%` : "";
       const cells = cfg.cycles.map((c, ci) => {
         const m = c.minutes[ti];
         const off = !m || !t.valve;
@@ -352,7 +360,8 @@ class IrrigationSchedulerCard extends HTMLElement {
         const tip = live ? "Watering now" : isNext ? "Up next" : done ? "Done in this cycle" : "";
         return `<td><button class="cell ${cls}" ${tip ? `title="${tip}"` : ""}
             data-act="cell" data-c="${ci}" data-t="${ti}" ${edit && t.valve ? "" : "disabled"}>
-          ${off ? `<span class="m">Off</span>` : `<span class="m">${m}<small>min</small></span>
+          ${off ? `<span class="m">Off</span>${t.valve ? `<span class="o faint" title="Run order #${c.order[ti]} (kept for when it has minutes)">#${c.order[ti]}</span>` : ""}`
+            : `<span class="m">${m}<small>min</small></span>
             <span class="o">${done ? "✓ " : ""}#${c.order[ti]}${c.soak[ti] ? ` <span title="cycle-and-soak">≈</span>` : ""}</span>
             ${isNext ? `<span class="nx">next</span>` : ""}`}
         </button></td>`;
@@ -361,7 +370,7 @@ class IrrigationSchedulerCard extends HTMLElement {
         <th class="tap"><button class="tapbtn ${this._edit && this._edit.kind === "tap" && this._edit.t === ti ? "sel" : ""}"
             data-act="tap" data-t="${ti}" title="${esc(t.label)}: run now, valve, settings">
           <span class="dot ${vOn ? "on" : ""} ${vBad ? "bad" : ""}" title="${esc(v ? v.state : "no valve")}"></span>
-          <span class="tl"><span>${esc(t.name || `Tap ${t.n}`)}</span><small>Tap ${t.n}${people ? " · person" : ""}${t.valve ? "" : " · no valve"}</small></span></button></th>
+          <span class="tl"><span>${esc(t.name || `Tap ${t.n}`)}</span><small>Tap ${t.n}${people ? " · person" : ""}${t.valve ? "" : " · no valve"}${offNote}${batNote}</small></span></button></th>
         ${cells}</tr>`;
     }).join("");
 
@@ -462,6 +471,45 @@ class IrrigationSchedulerCard extends HTMLElement {
       <span class="grow">${text}</span>${snooze ? `<span class="snz">${snooze}</span>` : ""}${btn}</div>`;
   }
 
+  // an offline valve: a waiting cycle (skip it, or Stop below), or one that cycles will wait for
+  _offlineRow(state, a) {
+    const cfg = this._cfg;
+    const label = (n) => (cfg.taps[n - 1] ? cfg.taps[n - 1].label : `Tap ${n}`);
+    const skipped = a.offline_skipped || [];
+    const waiting = a.offline_waiting || [];
+    const off = (waiting.length ? waiting : (a.offline || []).filter((n) => !skipped.includes(n)))
+      .filter((n) => !(state === "stuck" && a.tap === n)); // a stuck tap has its own row
+    if (!off.length) return "";
+    const can = off.filter((n) => (a.offline_can_skip || []).includes(n));
+    const names = off.map(label).join(", ");
+    const one = off.length === 1;
+    const text = waiting.length
+      ? `${esc(names)} ${one ? "is" : "are"} offline: cycle ${a.cycle || ""} is waiting${a.offline_until ? ` until ${hhmm(a.offline_until)}` : ""}.`
+      : `${esc(names)} ${one ? "is" : "are"} offline: cycles wait for ${one ? "it" : "them"} (you'll be asked).`;
+    const v = can.join(",");
+    const armed = this._offArmed === v;
+    const btn = can.length && this._canEdit()
+      ? `<button class="act ${armed ? "armed" : ""}" data-act="offskip" data-v="${v}" title="Water the other taps; included again when back online">${armed ? "Tap again to skip" : "Skip while offline"}</button>`
+      : can.length < off.length ? `<span class="hint">Last seen open: can't be skipped.</span>` : "";
+    return `<div class="mainrow ${waiting.length ? "alert" : ""}"><ha-icon icon="mdi:lan-disconnect"></ha-icon>
+      <span class="grow">${text}</span>${btn}</div>`;
+  }
+
+  // low valve batteries: snooze the warnings (a valve that gets low later still warns)
+  _batteryRow(a) {
+    const low = a.battery_low || [];
+    if (!low.length) return "";
+    const cfg = this._cfg;
+    const parts = low.map((n) => `${esc(cfg.taps[n - 1] ? cfg.taps[n - 1].label : `Tap ${n}`)} ${a.battery && a.battery[n] != null ? `${a.battery[n]}%` : ""}`);
+    const until = a.battery_snoozed_until;
+    const snooze = !this._canEdit() ? "" : until
+      ? `<span class="lab">Snoozed until ${esc(dayWord(until))} ${hhmm(until)}</span><button class="chip" data-act="batsnooze" data-v="0" title="Warn me again now">Resume</button>`
+      : `<span class="lab">Snooze</span>${[[12, "12 h"], [24, "1 day"], [72, "3 days"]].map(([h, t]) => `<button class="chip" data-act="batsnooze" data-v="${h}"
+          title="No low-battery warnings for ${t}">${t}</button>`).join("")}`;
+    return `<div class="mainrow"><ha-icon icon="mdi:battery-alert-variant-outline"></ha-icon>
+      <span class="grow">Low battery: ${parts.join(", ")}.</span>${snooze ? `<span class="snz">${snooze}</span>` : ""}</div>`;
+  }
+
   _editor() {
     const e = this._edit;
     if (!e || !this._cfg) return "";
@@ -528,24 +576,41 @@ class IrrigationSchedulerCard extends HTMLElement {
     const longest = Math.max(0, ...cfg.cycles.map((c) => c.minutes[ti] || 0));
     const choices = [...new Set([1, 2, 5, 10, 15, 20, 30, Math.min(longest, max)])]
       .filter((m) => m > 0 && m <= max).sort((x, y) => x - y);
+    const a = status ? status.attributes : {};
+    const lvl = a.battery ? a.battery[ti + 1] : null;
+    const offline = (a.offline || []).includes(ti + 1);
+    const skipped = (a.offline_skipped || []).includes(ti + 1);
+    const canSkip = (a.offline_can_skip || []).includes(ti + 1);
     const used = cfg.cycles.map((c, ci) => (c.minutes[ti] > 0
       ? `C${ci + 1}: ${c.minutes[ti]} min, #${c.order[ti]}${c.soak[ti] ? " ≈" : ""}` : "")).filter(Boolean);
     return `<div class="editor tappanel">
       <div class="eh">${esc(t.label)}</div>
       <div class="er"><span class="lab">Valve</span>
         ${t.valve ? `<span class="vid">${esc(t.valve)}</span><span class="vst ${vOn ? "on" : ""}">${esc(v ? v.state : "not found")}</span>`
+          + (lvl != null ? `<span class="vst ${(a.battery_low || []).includes(ti + 1) ? "low" : ""}" title="Battery${t.battery ? ` (${esc(t.battery)})` : ""}">battery ${lvl}%</span>` : "")
           : `<span class="hint">No valve: pick one under Tap settings.</span>`}</div>
+      ${skipped ? `<div class="er"><span class="hint grow">Offline: skipped in every cycle until it is back online.</span>
+          <button class="act" data-act="offinclude">Include again</button></div>`
+        : offline ? `<div class="er"><span class="hint grow">${canSkip ? "Offline: cycles wait for it (you'll be asked). Skipping it lets the other taps water."
+            : "Offline and last seen open: it may still be running, so it can't be skipped."}</span>
+          ${canSkip ? `<button class="act" data-act="offskip" data-v="${ti + 1}">Skip while offline</button>` : ""}</div>` : ""}
       <div class="er"><span class="lab">In cycles</span><span class="hint">${used.length ? esc(used.join(" · ")) : "none yet: tap a cell to add minutes"}</span></div>
-      ${t.valve ? `<div class="er"><span class="lab">Run now</span><span class="chips">${choices.map((m) =>
+      ${t.valve && !offline ? `<div class="er"><span class="lab">Run now</span><span class="chips">${choices.map((m) =>
         `<button class="chip" data-act="runtap" data-v="${m}" title="Open ${esc(t.label)} for ${m} min">${m} min</button>`).join("")}</span></div>
         <div class="hint">Opens this tap now as a manual run: any other open tap closes and a running cycle pauses until it is done.</div>` : ""}
       ${mine && state === "manual" ? `<div class="er"><button class="act stop" data-act="tapoff">Stop this manual run</button></div>` : ""}
       ${mine && state === "watering" ? `<div class="er"><button class="act" data-act="skip">Skip this tap in the cycle</button></div>` : ""}
       <div class="er end">
         ${t.valve ? `<button class="act" data-act="valveinfo">Valve details</button>` : ""}
-        ${this._canEdit() ? `<button class="act" data-act="tapsettings">Tap settings</button>` : ""}
+        ${this._canEdit() ? `<button class="act ${this._tapSettingsOpen(ti) ? "on" : ""}" data-act="tapsettings">${this._tapSettingsOpen(ti) ? "Hide tap settings" : "Tap settings"}</button>` : ""}
         <button class="act primary" data-act="cancel">Close</button></div>
     </div>`;
+  }
+
+  // a dashboard card's settings are showing this tap (pressing "Tap settings" again hides them)
+  _tapSettingsOpen(tap) {
+    return !this._config.in_panel && !!this._showSettings && !!this._settings && this._settings.isConnected
+      && this._settings._tab === "taps" && this._settings._tap === tap;
   }
 
   _openSettings(tab, tap) {
@@ -554,10 +619,16 @@ class IrrigationSchedulerCard extends HTMLElement {
       this.dispatchEvent(new CustomEvent("irrigation-open-settings", { detail: { tab, tap }, bubbles: true, composed: true }));
       return;
     }
+    if (tab === "taps" && this._tapSettingsOpen(tap)) { // second press: hide them again
+      this._showSettings = false;
+      this._mountSettings();
+      this._render();
+      return;
+    }
     this._showSettings = true;
     this._mountSettings();
-    this._render();
     if (this._settings) this._settings.open(tab, tap);
+    this._render(); // after open(): the button then reads "Hide tap settings"
   }
 
   _input(ev, el) {
@@ -603,6 +674,25 @@ class IrrigationSchedulerCard extends HTMLElement {
         break;
       case "snooze":
         this._call(DOMAIN, "snooze_main_water_reminders", { hours: Number(el.dataset.v), config_entry_id: cfg.entry_id });
+        break;
+      case "batsnooze":
+        this._call(DOMAIN, "snooze_battery_warnings", { hours: Number(el.dataset.v), config_entry_id: cfg.entry_id });
+        break;
+      case "offskip": { // two taps (it lets the other taps run while this valve can't be confirmed closed)
+        const taps = String(el.dataset.v).split(",").map(Number);
+        clearTimeout(this._offTimer);
+        if (this._offArmed !== el.dataset.v) {
+          this._offArmed = el.dataset.v;
+          this._offTimer = setTimeout(() => { this._offArmed = null; this._render(); }, 5000);
+        } else {
+          this._offArmed = null;
+          taps.forEach((n) => this._call(DOMAIN, "skip_offline_tap", { tap: n, skip: true, config_entry_id: cfg.entry_id }));
+        }
+        this._render();
+        break;
+      }
+      case "offinclude":
+        this._call(DOMAIN, "skip_offline_tap", { tap: e.t + 1, skip: false, config_entry_id: cfg.entry_id });
         break;
       case "main": { // two taps: the first arms the button for 5 s, the second acts
         const want = el.dataset.v;
@@ -698,7 +788,7 @@ const CSS = `
   .pill { font-size: .78em; padding: 3px 9px; border-radius: 999px; background: var(--secondary-background-color); color: var(--primary-text-color); white-space: nowrap; }
   .pill.s-watering, .pill.s-manual { background: var(--primary-color); color: var(--text-primary-color, #fff); }
   .pill.s-soaking, .pill.s-gap { background: color-mix(in srgb, var(--primary-color) 22%, transparent); }
-  .pill.s-held, .pill.s-waiting { background: color-mix(in srgb, var(--warning-color, #ffa600) 30%, transparent); }
+  .pill.s-held, .pill.s-waiting, .pill.s-offline { background: color-mix(in srgb, var(--warning-color, #ffa600) 30%, transparent); }
   .pill.s-stuck { background: var(--error-color, #db4437); color: #fff; }
   .pill .left { font-weight: 600; font-variant-numeric: tabular-nums; }
   #main { container-type: inline-size; }
@@ -756,6 +846,8 @@ const CSS = `
   .vid { font-size: .8em; color: var(--secondary-text-color); overflow-wrap: anywhere; }
   .vst { font-size: .75em; padding: 1px 8px; border-radius: 999px; background: var(--card-background-color, #fff); border: 1px solid var(--divider-color); }
   .vst.on { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .vst.low { background: color-mix(in srgb, var(--warning-color, #ffa600) 30%, transparent); }
+  .act.on { border-color: var(--primary-color); color: var(--primary-color); }
   .tappanel .er .lab { min-width: 5.5em; }
   .tl { display: inline-flex; flex-direction: column; line-height: 1.15; min-width: 0; font-size: .92em; }
   .tl > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
@@ -771,6 +863,7 @@ const CSS = `
   .cell .o { font-size: .7em; color: var(--secondary-text-color); }
   .cell.off { background: var(--secondary-background-color); color: var(--disabled-text-color, #9e9e9e); }
   .cell.off .m { font-weight: 400; font-size: .85em; }
+  .cell .o.faint { opacity: .5; }
   .cell.runcol { background: color-mix(in srgb, var(--primary-color) 30%, var(--ha-card-background, var(--card-background-color, #fff)));
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary-color) 75%, transparent); }
   .cell.nextcol { background: color-mix(in srgb, var(--warning-color, #ffa600) 14%, var(--ha-card-background, var(--card-background-color, #fff))); }
@@ -841,6 +934,8 @@ const S = {
   ent: (domain, multiple = false) => ({ entity: { filter: { domain }, ...(multiple ? { multiple: true } : {}) } }),
   bool: { boolean: {} },
   text: { text: {} },
+  time: { time: {} },
+  date: { date: {} },
 };
 const GROUPS = {
   taps: { label: "Taps", group: "tap", step: "tap", schema: [
@@ -850,6 +945,7 @@ const GROUPS = {
     { name: "soil", selector: S.ent(["sensor"]) },
     { name: "soil_pct", selector: S.num(0, 100, 1, "%") },
     { name: "bypass", selector: S.ent(["input_boolean", "switch", "binary_sensor"]) },
+    { name: "battery", selector: S.ent(["sensor"]) },
   ] },
   general: { label: "General", group: "general", step: "general", key: "general", schema: [
     { name: "gap_s", selector: S.num(0, 60, 1, "s") },
@@ -899,6 +995,23 @@ const GROUPS = {
     { name: "auto_close", selector: S.bool },
     { name: "remind_min", selector: S.num(0, 720, 5, "min") },
     { name: "remind_cycle", selector: S.bool },
+  ] },
+  offline: { label: "Offline valves", group: "offline", step: "offline", key: "offline", schema: [
+    { name: "wait_min", selector: S.num(1, 240, 5, "min") },
+    { name: "no_answer", selector: { select: { mode: "dropdown", options: [
+      { value: "stop", label: "Stop the cycle" }, { value: "skip", label: "Skip the offline tap and carry on" }] } } },
+    { name: "ask_ahead", selector: S.bool },
+  ] },
+  battery: { label: "Batteries", group: "battery", step: "battery", key: "battery", schema: [
+    { name: "pct", selector: S.num(0, 100, 5, "%") },
+    { name: "remind_h", selector: S.num(0, 48, 0.5, "h") },
+    { name: "quiet_on", selector: S.bool },
+    { name: "quiet_from", selector: S.time },
+    { name: "quiet_to", selector: S.time },
+    { name: "report_on", selector: S.bool },
+    { name: "report_days", selector: S.num(1, 90, 1, "days") },
+    { name: "report_time", selector: S.time },
+    { name: "report_start", selector: S.date },
   ] },
   counts: { label: "Taps & cycles", group: "counts", step: "counts", schema: [
     { name: "tap_count", selector: S.num(1, 16) },
@@ -1092,8 +1205,22 @@ class IrrigationSchedulerSettings extends HTMLElement {
     const txt = this._pending.size || this._status === "saving" ? "Saving…"
       : err ? `Not saved: ${this._msg}`
         : this._status === "saved" ? "All changes saved" : "Changes save automatically";
-    this._foot.innerHTML = `<span class="msg ${err ? "err" : ""}">${esc(txt)}</span>
+    const st = s.status_entity && this._hass.states[s.status_entity];
+    const next = st && st.attributes.battery_report_next;
+    const report = this._tab !== "battery" ? "" : `<span class="msg">${next ? `Next battery report ${esc(dateText(next))}.` : "The battery report is off."}${this._reportMsg ? ` ${esc(this._reportMsg)}` : ""}</span>
+      <button class="act" data-a="report" title="Send the battery report to your phone now">Send report now</button>`;
+    this._foot.innerHTML = `${report}<span class="msg ${err ? "err" : ""}">${esc(txt)}</span>
       ${err && dirty ? `<button class="act" data-a="revert">Undo</button><button class="act primary" data-a="retry">Try again</button>` : ""}`;
+  }
+
+  async _report() {
+    try {
+      await this._hass.callService(DOMAIN, "send_battery_report", { config_entry_id: this._entryId });
+      this._reportMsg = "Sent.";
+    } catch (e) {
+      this._reportMsg = `Not sent: ${e.message || e}`;
+    }
+    this._render();
   }
 
   _changed(value) {
@@ -1189,6 +1316,7 @@ class IrrigationSchedulerSettings extends HTMLElement {
       this._render();
     } else if (a === "retry") { this._pending.add(this._key()); this._flush(true); }
     else if (a === "save") this._save();
+    else if (a === "report") this._report();
   }
 
   async _save() {

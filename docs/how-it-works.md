@@ -19,10 +19,12 @@ custom_components/irrigation_sequencer/
   estimate.py        when the running cycle should finish (the "23 min left" on the card)
   model.py           the settings: their shape, defaults and checks (run order swaps, limits)
   coordinator.py     the Home Assistant side: listens to valves and sensors, runs the engine, opens and closes
-                     valves (and checks they did), saves its state, sends notifications
+                     valves (and checks they did), saves its state, sends notifications; finds each valve's
+                     battery sensor on its device (or the one set under the tap)
   switch.py number.py sensor.py binary_sensor.py
                      the entities (master switch, cycle switches, seasonal %, status, next cycle, people guard)
-  services.py        the actions run_cycle, stop, skip_tap, run_tap
+  services.py        the actions: run_cycle, stop, skip_tap, run_tap, the main water, skip_offline_tap,
+                     snooze_battery_warnings, send_battery_report
   config_flow.py     the set-up screen and Settings > Devices & services > Irrigation Scheduler > Configure
   websocket.py       what the card and the Irrigation page talk to (read the grid and the settings, save them)
   notify.py          phone notifications (tags, iOS thread, time-sensitive, the "Turn master switch on" button)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -55,7 +56,27 @@ DEFAULT_WEATHER = {
     "cold_c": 2,
     "boost_pct": 100,
 }
-DEFAULT_TAP = {"valve": "", "name": "", "people": [], "soil": "", "soil_pct": 0, "bypass": ""}
+# battery: an optional battery sensor (%) for the tap's valve; empty = found on the valve's device
+DEFAULT_TAP = {"valve": "", "name": "", "people": [], "soil": "", "soil_pct": 0, "bypass": "", "battery": ""}
+# Offline valves: no tap opens while another valve is offline (it can't be confirmed closed). The cycle waits and
+# asks (skip that tap while it is offline, or stop the cycle); with no answer after wait_min it does no_answer.
+# ask_ahead: ask 20 min before a cycle too, so it can be settled before the start.
+NO_ANSWER = ("stop", "skip")
+DEFAULT_OFFLINE = {"wait_min": 30, "no_answer": "stop", "ask_ahead": True}
+# Valve batteries: a warning at or below pct (0 = off), repeated every remind_h hours (0 = once) and held back during
+# the quiet time; plus a report of every level every report_days days at report_time (counted from report_start,
+# a date, when it is set).
+DEFAULT_BATTERY = {
+    "pct": 30,
+    "remind_h": 2,
+    "quiet_on": True,
+    "quiet_from": "21:00",
+    "quiet_to": "06:00",
+    "report_on": True,
+    "report_days": 14,
+    "report_time": "10:00",
+    "report_start": "",
+}
 # Main water: the supply valve for every tap. A tap that can't be confirmed off for wait_min minutes raises a
 # critical alert with a "Close main water" button, or (auto_close) closes it straight away. While it is off you are
 # reminded every remind_min minutes (snooze from the notification), and 20 / 10 min before a cycle (remind_cycle).
@@ -112,6 +133,16 @@ def normalize_time(v: Any, default: str = "06:00") -> str:
     if not (0 <= h <= 23 and 0 <= m <= 59):
         return default
     return f"{h:02d}:{m:02d}"
+
+
+def normalize_date(v: Any) -> str:
+    """'2026-11-01' (or '2026-11-01T…') -> '2026-11-01'. Invalid / empty -> ''."""
+    if not isinstance(v, str) or not v.strip():
+        return ""
+    try:
+        return date.fromisoformat(v.strip()[:10]).isoformat()
+    except ValueError:
+        return ""
 
 
 def fix_order(order: list[int]) -> list[int]:
@@ -232,6 +263,24 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
         "remind_min": _int(m["remind_min"], 30, 0, 720),
         "remind_cycle": bool(m["remind_cycle"]),
     }
+    f = {**DEFAULT_OFFLINE, **(raw.get("offline") or {})}
+    out["offline"] = {
+        "wait_min": _int(f["wait_min"], 30, 1, 240),
+        "no_answer": f["no_answer"] if f["no_answer"] in NO_ANSWER else "stop",
+        "ask_ahead": bool(f["ask_ahead"]),
+    }
+    b = {**DEFAULT_BATTERY, **(raw.get("battery") or {})}
+    out["battery"] = {
+        "pct": _int(b["pct"], 30, 0, 100),
+        "remind_h": _float(b["remind_h"], 2, 0, 48),
+        "quiet_on": bool(b["quiet_on"]),
+        "quiet_from": normalize_time(b["quiet_from"], "21:00"),
+        "quiet_to": normalize_time(b["quiet_to"], "06:00"),
+        "report_on": bool(b["report_on"]),
+        "report_days": _int(b["report_days"], 14, 1, 90),
+        "report_time": normalize_time(b["report_time"], "10:00"),
+        "report_start": normalize_date(b["report_start"]),
+    }
 
     taps_in = raw.get("taps") or []
     taps = []
@@ -244,6 +293,7 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
             "soil": _str(t["soil"]),
             "soil_pct": _float(t["soil_pct"], 0, 0, 100),
             "bypass": _str(t["bypass"]),
+            "battery": _str(t["battery"]),
         })
     out["taps"] = taps
 
@@ -278,6 +328,7 @@ class TapCfg:
     soil: str = ""
     soil_pct: float = 0.0
     bypass: str = ""
+    battery: str = ""
 
 
 @dataclass
@@ -330,6 +381,18 @@ class Cfg:
     main_auto_close: bool = False
     main_remind_min: int = 30
     main_remind_cycle: bool = True
+    off_wait_min: int = 30
+    off_no_answer: str = "stop"
+    off_ask_ahead: bool = True
+    bat_pct: int = 30
+    bat_remind_h: float = 2
+    quiet_on: bool = True
+    quiet_from: str = "21:00"
+    quiet_to: str = "06:00"
+    rep_on: bool = True
+    rep_days: int = 14
+    rep_time: str = "10:00"
+    rep_start: str = ""
 
     def label(self, i: int) -> str:
         """'Tap 1 (Backyard Left)' or 'Tap 1'."""
@@ -340,6 +403,7 @@ class Cfg:
 def parse(options: dict[str, Any]) -> Cfg:
     o = normalize(options)
     g, n, s, p, w, m = o["general"], o["notify"], o["soak"], o["people"], o["weather"], o["main"]
+    f, b = o["offline"], o["battery"]
     return Cfg(
         taps=[TapCfg(**t) for t in o["taps"]],
         cycles=[CycleCfg(**c) for c in o["cycles"]],
@@ -357,4 +421,8 @@ def parse(options: dict[str, Any]) -> Cfg:
         n_reminders=n["reminders"], n_rain=n["rain"], hot_c=n["hot_c"],
         main_valve=m["valve"], main_wait_min=m["wait_min"], main_auto_close=m["auto_close"],
         main_remind_min=m["remind_min"], main_remind_cycle=m["remind_cycle"],
+        off_wait_min=f["wait_min"], off_no_answer=f["no_answer"], off_ask_ahead=f["ask_ahead"],
+        bat_pct=b["pct"], bat_remind_h=b["remind_h"], quiet_on=b["quiet_on"], quiet_from=b["quiet_from"],
+        quiet_to=b["quiet_to"], rep_on=b["report_on"], rep_days=b["report_days"], rep_time=b["report_time"],
+        rep_start=b["report_start"],
     )

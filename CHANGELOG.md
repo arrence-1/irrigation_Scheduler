@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.5.0 (21 Oct 2026) — offline valves and valve batteries
+
+* **Offline valves** (new *Offline valves* tab and Configure screen). Before, any offline valve stopped a cycle. Now
+  the cycle **waits** and you get a time-sensitive notification: press and hold for **Skip while offline** (needs
+  Face ID / unlock) or **Stop the cycle**. A skipped tap sits every cycle out until it is back online, then it is in
+  again by itself (if it comes back reporting open it is closed at once). With no answer after 30 min (*Wait for an
+  answer*) the cycle stops, or, with *With no answer: Skip*, it skips the tap and carries on. Also asked 20 min before
+  a cycle (*Ask 20 min before a cycle*). A valve last seen open is never skipped (that stays the stuck-tap / main
+  water alert). The status sensor shows *offline* (Waiting: valve offline).
+* **Valve batteries** (new *Batteries* tab). Each tap's battery sensor is found on its valve's device (or pick one
+  under the tap). **Low battery warning** at or below 30 %, repeated every 2 h until replaced (fine again 5 % above),
+  held back during the **quiet time** (21:00-06:00); press and hold to **Snooze 1 day** or **Snooze…** (type 12, 2d,
+  1 week). A valve that gets low later still warns. **Battery report**: every valve's level every 14 days at 10:00
+  (days, time and a first date are settings), plus *Send report now*. All levels, times and repeats can be changed.
+* New actions `irrigation_sequencer.skip_offline_tap`, `snooze_battery_warnings` and `send_battery_report`; status
+  attributes `offline`, `offline_skipped`, `offline_waiting`, `offline_until`, `battery`, `battery_low`,
+  `battery_snoozed_until`, `battery_report_next`.
+* **Card:** Off cells keep their run order (faint "#2"), so the positions stay visible. *Tap settings* now hides the
+  settings when pressed again. Rows for an offline valve (*Skip while offline*, tap twice) and low batteries (*Snooze
+  12 h / 1 day / 3 days*); the tap panel shows the battery % and *Skip while offline* / *Include again*.
+
 ## 1.4.0 (21 Oct 2026) — main water valve
 
 * **Main water** (new settings tab and Configure screen): pick the valve that supplies every tap (a switch, valve,

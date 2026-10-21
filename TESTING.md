@@ -169,3 +169,28 @@ it (the two tests that check the address now expect it).
   *Main water* tab with valve (light allowed) / wait / auto-close / remind every / remind before a cycle; snooze
   chips 1 h / 4 h / 12 h call the action, "Reminders snoozed until …" with *Resume reminders*.
 * hassfest 2026.10.1: 0 invalid. `ruff` clean.
+
+## 1.5.0 (21 Oct 2026) — offline valves and valve batteries
+* **131 / 131 tests pass on Home Assistant 2026.10.1** (was 111). New engine scenarios: a valve offline 20 min before
+  a cycle → asked ahead (once) → *Skip while offline* → the cycle waters the rest on time, "Skipped while offline"
+  → back online = in the cycles again; offline at the start → the cycle waits (status *offline*), one question with
+  the deadline → skip from the notification carries on at once, or the valve coming back carries on with it, or no
+  answer → stops at 06:30 (or, with *no answer: skip*, skips and carries on); a valve last seen open can't be skipped
+  and the cycle stops; a skipped valve coming back open is closed at once (not taken as a manual run); *Stop the
+  cycle*; include again / nothing to skip; the question cleared when the valve is back; old saved state loads.
+  Batteries: warning at 30 % repeats every 2 h, held in the quiet time (18:00, 20:00, then 06:00, 08:00); snooze
+  1 day, a new low valve breaks through, 32 % stays low (fine again from 35 %), fine again stops it; warn once
+  (repeat 0) and off (0 %); report every 14 days from the first day (10:00), on request, a start date + new time
+  (no report for the past), report off; "no battery sensor" on request; the offline question shows the last level.
+* New Home Assistant tests: the *Offline valves* and *Batteries* Configure screens (start date cleared), the tap's
+  battery sensor field, the settings websocket groups (clamped, bad date → empty), the battery sensor found on the
+  valve's device (ZHA first, not Battery Notes' copy, not the signal sensor) or picked by hand; the offline question
+  payload (time-sensitive, *Skip while offline* with unlock, *Stop the cycle*), the phone's skip carrying on, back
+  online; the stop button and `skip_offline_tap` (errors, include again, online tap); the low-battery warning
+  (held in the quiet time until 06:00, *Snooze 1 day* / *Snooze…* buttons), typed "2d" and "?" replies,
+  `snooze_battery_warnings` 0, `send_battery_report`, fine again with new batteries; typed days and weeks.
+* Card (jsdom): Off cell shows "#2" faintly; pill *Waiting: valve offline*; offline row with two-tap *Skip while
+  offline*; battery row with 12 h / 1 day / 3 days (and *Snoozed until … Resume*); tap subtitle "offline · battery
+  22%"; tap panel battery % and *Include again*; *Tap settings* → "Hide tap settings" → hidden again; the *Offline
+  valves* / *Batteries* tabs and *Send report now*. Also looked at in Chromium at phone width.
+* hassfest 2026.10.1: 0 invalid. `ruff` clean. `release_check 1.5.0` OK.

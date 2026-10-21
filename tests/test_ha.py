@@ -140,6 +140,13 @@ async def test_options_flow_every_screen(hass: HomeAssistant, rig: Rig) -> None:
     r = await flows.async_configure(r["flow_id"], {"valve": "input_boolean.tap_1", "name": "BL", "soil_pct": 0})
     await rig.settle()
     assert entry.options["taps"][0]["soil"] == "" and entry.options["taps"][0]["people"] == []
+    assert entry.options["taps"][0]["battery"] == ""
+    r = await open_menu("tap_pick")
+    r = await flows.async_configure(r["flow_id"], {"tap": "2"})
+    r = await flows.async_configure(r["flow_id"], {"valve": "input_boolean.tap_2", "name": "BC", "soil_pct": 0,
+                                                   "battery": "sensor.tap_2_battery"})
+    await rig.settle()
+    assert entry.options["taps"][1]["battery"] == "sensor.tap_2_battery"
 
     for step, data, check in [
         ("general", {"gap_s": 10, "confirm_s": 20, "max_run_min": 30, "late_min": 45},
@@ -160,6 +167,16 @@ async def test_options_flow_every_screen(hass: HomeAssistant, rig: Rig) -> None:
         ("main", {"wait_min": 10, "auto_close": False, "remind_min": 30, "remind_cycle": True},  # valve cleared
          lambda o: o["main"] == {"valve": "", "wait_min": 10, "auto_close": False, "remind_min": 30,
                                  "remind_cycle": True}),
+        ("offline", {"wait_min": 20, "no_answer": "skip", "ask_ahead": False},
+         lambda o: o["offline"] == {"wait_min": 20, "no_answer": "skip", "ask_ahead": False}),
+        ("battery", {"pct": 25, "remind_h": 3, "quiet_on": True, "quiet_from": "22:00:00", "quiet_to": "07:00:00",
+                     "report_on": True, "report_days": 7, "report_time": "09:30:00", "report_start": "2026-11-01"},
+         lambda o: o["battery"] == {"pct": 25, "remind_h": 3, "quiet_on": True, "quiet_from": "22:00",
+                                    "quiet_to": "07:00", "report_on": True, "report_days": 7,
+                                    "report_time": "09:30", "report_start": "2026-11-01"}),
+        ("battery", {"pct": 30, "remind_h": 2, "quiet_on": False, "quiet_from": "21:00:00", "quiet_to": "06:00:00",
+                     "report_on": False, "report_days": 14, "report_time": "10:00:00"},  # start date cleared
+         lambda o: o["battery"]["report_start"] == "" and o["battery"]["report_on"] is False),
     ]:
         r = await open_menu(step)
         assert r["type"] is FlowResultType.FORM, step
@@ -492,6 +509,10 @@ def test_parse_typed_snooze_hours() -> None:
     assert parse_hours("90m") == 1.5 and parse_hours("90 min") == 1.5 and parse_hours("4 hours") == 4
     assert parse_hours("0") == 0
     assert parse_hours("soon") is None and parse_hours("200") is None and parse_hours(None) is None
+    # battery snoozes take days and weeks too (up to 30 days)
+    assert parse_hours("3d", max_h=720) == 72 and parse_hours("2 days", max_h=720) == 48
+    assert parse_hours("1 week", max_h=720) == 168 and parse_hours("30d", max_h=720) == 720
+    assert parse_hours("31 days", max_h=720) is None and parse_hours("12", max_h=720) == 12
 
 
 async def test_main_water_services(hass: HomeAssistant, rig: Rig) -> None:
@@ -636,3 +657,146 @@ async def test_second_entry_needs_entry_id_for_services(hass: HomeAssistant, rig
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(DOMAIN, "stop", {}, blocking=True)
     await hass.services.async_call(DOMAIN, "stop", {"config_entry_id": other.entry_id}, blocking=True)
+
+
+# --------------------------------------------------------------------------
+# Offline valves and valve batteries
+# --------------------------------------------------------------------------
+def _notes(rig: Rig, tag: str) -> list[dict]:
+    return [c.data for c in rig.notes if c.data.get("data", {}).get("tag") == tag]
+
+
+async def test_offline_valve_question_buttons_skip_and_back_online(hass: HomeAssistant, rig: Rig) -> None:
+    o = cycle(make_options(rig.phone_id, offline={"ask_ahead": False}), 0, "06:00", [1, 1, 1])
+    await rig.setup_entry(o)
+    await master_on(hass, rig)
+    hass.states.async_set("input_boolean.tap_3", "unavailable")  # e.g. its battery went flat
+    await rig.settle()
+    await rig.goto("2026-10-12 06:01")
+    st = hass.states.get("sensor.irrigation_status")
+    assert st.state == "offline"
+    assert st.attributes["offline"] == [3] and st.attributes["offline_waiting"] == [3]
+    assert st.attributes["offline_can_skip"] == [3] and st.attributes["offline_until"].startswith("2026-10-12T06:30")
+    ask = _notes(rig, "irrigation_offline")
+    assert len(ask) == 1 and ask[0]["title"] == "Irrigation - Valve offline"
+    assert ask[0]["message"].startswith("Cycle 1 is waiting: Tap 3 (Front Lawn) has been offline since 05:50")
+    assert ask[0]["data"]["push"]["interruption-level"] == "time-sensitive"
+    assert ask[0]["data"]["actions"] == [
+        {"action": "irrigation_offline_skip", "title": "Skip while offline", "authenticationRequired": True},
+        {"action": "irrigation_offline_stop", "title": "Stop the cycle", "destructive": True},
+    ]
+    assert not rig.periods("input_boolean.tap_1")
+
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_offline_skip"})
+    await rig.settle()
+    await rig.goto("2026-10-12 06:05")
+    assert rig.order() == ["1", "2"] and rig.max_open == 1
+    note = _notes(rig, "irrigation_offline")[-1]
+    assert "Tap 3 (Front Lawn) is skipped in every cycle while it is offline" in note["message"]
+    assert "Cycle 1 carries on at 06:01." in note["message"] and "actions" not in note["data"]
+    assert hass.states.get("sensor.irrigation_status").attributes["offline_skipped"] == [3]
+
+    hass.states.async_set("input_boolean.tap_3", "off")
+    await rig.settle()
+    assert _notes(rig, "irrigation_offline")[-1]["message"] == ("Tap 3 (Front Lawn) is back online: it is in the "
+                                                                "cycles again.")
+    st = hass.states.get("sensor.irrigation_status")
+    assert st.attributes["offline"] == [] and st.attributes["offline_skipped"] == []
+
+
+async def test_offline_stop_button_and_skip_offline_tap_action(hass: HomeAssistant, rig: Rig) -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    o = cycle(make_options(rig.phone_id, offline={"ask_ahead": False}), 0, "06:00", [1, 1, 1])
+    await rig.setup_entry(o)
+    await master_on(hass, rig)
+    hass.states.async_set("input_boolean.tap_2", "unavailable")
+    await rig.goto("2026-10-12 06:01")
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_offline_stop"})
+    await rig.settle()
+    assert "Cycle 1 stopped at 06:01 (requested)." in _notes(rig, "irrigation_offline")[-1]["message"]
+    assert hass.states.get("sensor.irrigation_status").state == "idle" and not rig.order()
+    with pytest.raises(ServiceValidationError, match="only 3 taps"):
+        await hass.services.async_call(DOMAIN, "skip_offline_tap", {"tap": 9}, blocking=True)
+    await hass.services.async_call(DOMAIN, "skip_offline_tap", {"tap": 2}, blocking=True)
+    await rig.settle()
+    assert hass.states.get("sensor.irrigation_status").attributes["offline_skipped"] == [2]
+    await hass.services.async_call(DOMAIN, "skip_offline_tap", {"tap": 2, "skip": False}, blocking=True)
+    await rig.settle()
+    assert hass.states.get("sensor.irrigation_status").attributes["offline_skipped"] == []
+    await hass.services.async_call(DOMAIN, "skip_offline_tap", {"tap": 1}, blocking=True)
+    await rig.settle()
+    assert "is online: there is nothing to skip" in _notes(rig, "irrigation_offline")[-1]["message"]
+
+
+async def test_battery_sensor_found_on_the_valves_device(hass: HomeAssistant, rig: Rig) -> None:
+    from homeassistant.helpers import device_registry as dr
+
+    zha = MockConfigEntry(domain="zha")
+    zha.add_to_hass(hass)
+    dev = dr.async_get(hass).async_get_or_create(config_entry_id=zha.entry_id, identifiers={("zha", "valve-1")},
+                                                 name="WS Valve")
+    reg = er.async_get(hass)
+    valve = reg.async_get_or_create("switch", "zha", "valve-1-switch", device_id=dev.id, config_entry=zha)
+    plus = reg.async_get_or_create("sensor", "battery_notes", "valve-1-plus", device_id=dev.id,
+                                   original_device_class="battery", unit_of_measurement="%")
+    bat = reg.async_get_or_create("sensor", "zha", "valve-1-battery", device_id=dev.id, config_entry=zha,
+                                  original_device_class="battery", unit_of_measurement="%")
+    reg.async_get_or_create("sensor", "zha", "valve-1-rssi", device_id=dev.id, config_entry=zha,
+                            original_device_class="signal_strength", unit_of_measurement="dBm")
+    hass.states.async_set(valve.entity_id, "off")  # online (start-up waits for the valves)
+    o = make_options(rig.phone_id)
+    o["taps"][0]["valve"] = valve.entity_id
+    o["taps"][2]["battery"] = "sensor.my_tap_3_battery"  # chosen by hand
+    await rig.setup_entry(o)
+    assert rig.coord.battery_ids == [bat.entity_id, "", "sensor.my_tap_3_battery"]
+    assert plus.entity_id != bat.entity_id  # Battery Notes' copy is not picked
+    hass.states.async_set(bat.entity_id, "54", {"device_class": "battery", "unit_of_measurement": "%"})
+    await rig.settle()
+    assert hass.states.get("sensor.irrigation_status").attributes["battery"] == {"1": 54, "2": None, "3": None}
+
+
+async def test_low_battery_warning_snooze_and_report(hass: HomeAssistant, rig: Rig) -> None:
+    o = make_options(rig.phone_id)
+    o["taps"][1]["battery"] = "sensor.tap_2_battery"
+    await rig.setup_entry(o)
+    hass.states.async_set("sensor.tap_2_battery", "25", {"unit_of_measurement": "%"})
+    await rig.settle()
+    assert not _notes(rig, "irrigation_battery")  # 05:50 is in the quiet time (21:00-06:00)
+    await rig.goto("2026-10-12 06:01", step_s=20)
+    warn = _notes(rig, "irrigation_battery")
+    assert len(warn) == 1 and warn[0]["title"] == "Irrigation - Low battery"
+    assert warn[0]["message"].startswith("Low battery (warning at 30%): Tap 2 (Backyard Centre) 25%.")
+    assert warn[0]["data"]["push"]["interruption-level"] == "active"
+    assert warn[0]["data"]["actions"] == [
+        {"action": "irrigation_battery_snooze_24", "title": "Snooze 1 day"},
+        {"action": "irrigation_battery_snooze", "title": "Snooze…", "behavior": "textInput",
+         "textInputButtonTitle": "Snooze", "textInputPlaceholder": "Hours or days, e.g. 12 or 3d"},
+    ]
+    st = hass.states.get("sensor.irrigation_status")
+    assert st.attributes["battery_low"] == [2] and st.attributes["battery"]["2"] == 25
+
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_battery_snooze", "reply_text": "2d"})
+    await rig.settle()
+    assert _notes(rig, "irrigation_battery")[-1]["message"].startswith("Battery warnings snoozed for 2 days, until Wed")
+    assert hass.states.get("sensor.irrigation_status").attributes["battery_snoozed_until"].startswith("2026-10-14")
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_battery_snooze", "reply_text": "?"})
+    await rig.settle()
+    assert "Couldn't read \"?\" as hours or days" in _notes(rig, "irrigation_battery")[-1]["message"]
+    await hass.services.async_call(DOMAIN, "snooze_battery_warnings", {"hours": 0}, blocking=True)
+    await rig.settle()
+    assert "Battery warnings are back on." in _notes(rig, "irrigation_battery")[-1]["message"]
+
+    await hass.services.async_call(DOMAIN, "send_battery_report", {}, blocking=True)
+    await rig.settle()
+    rep = _notes(rig, "irrigation_battery_report")
+    assert rep[-1]["title"] == "Irrigation - Battery levels"
+    assert rep[-1]["message"].startswith("Battery levels: Tap 1 (Backyard Left): no battery reading; Tap 2 "
+                                         "(Backyard Centre) 25% LOW; Tap 3 (Front Lawn): no battery reading.")
+    nxt = hass.states.get("sensor.irrigation_status").attributes["battery_report_next"]
+    assert nxt.startswith("2026-10-12T10:00")  # counts from today: first report at 10:00
+
+    hass.states.async_set("sensor.tap_2_battery", "100", {"unit_of_measurement": "%"})  # new batteries
+    await rig.settle()
+    assert _notes(rig, "irrigation_battery")[-1]["message"] == "Battery fine again: Tap 2 (Backyard Centre) 100%."
+    assert hass.states.get("sensor.irrigation_status").attributes["battery_low"] == []
