@@ -150,16 +150,22 @@ Card address fingerprint: `_card_tag()` gives `1.3.3-a2fc7506`; the resource and
 it (the two tests that check the address now expect it).
 
 ## 1.4.0 (21 Oct 2026) — main water valve
-* **106 / 106 tests pass on Home Assistant 2026.10.1** (was 96). New engine scenarios: stuck tap → critical alert
+* **111 / 111 tests pass on Home Assistant 2026.10.1** (was 96). New engine scenarios: stuck tap → critical alert
   after the wait (once) → *Close main water* pressed → tap fixed → *Open main water* prompt, never re-opened by the
   app, cycle waits and carries on after you open it; automatic close; main water closed by hand answers the alert;
   main water off holds cycles (run late) and pauses a running tap (keeps its time); no main valve = no change;
-  requests when already there; old saved state loads.
+  requests when already there; old saved state loads. Reminders: every 30 min while off (08:35, 09:05), snoozed
+  2 h at 09:10 (none until 11:10, then again), cleared from the phone when the water is back on; 20 / 10 min before a
+  cycle even while snoozed (cleared at the start time); reminders off / switched on later / "remind again now";
+  while a tap is stuck the reminder has no Open button; opened by the app = no extra clear.
 * New Home Assistant tests: the Main water Configure screen (set, then cleared), the settings websocket group
   (clamped like the screen), the alert's payload (critical sound, `irrigation_main` tag, *Close main water*
   destructive button), the phone's action closing a **light** entity, the *Open main water* prompt (needs unlock),
-  status *held* while it waits, both actions (`close_main_water`, `open_main_water`, error without a valve).
+  status *held* while it waits, the prompt's Snooze 1 h / Snooze… (text input) buttons, a typed "2.5" snoozing and
+  "soon" refused, all three actions (`close_main_water`, `open_main_water`, `snooze_main_water_reminders`, error
+  without a valve), `main_snoozed_until` set and cleared; parsing typed hours (3, 1,5, 2h, 90m, 4 hours).
 * Card (jsdom, also in CI): stuck → *Close main water* row, two-tap arming, service called with the entry; main off →
   *Open main water*, pill *Held*; stuck with the water already off → no button; all fine → no row; the settings'
-  *Main water* tab with valve (light allowed) / wait / auto-close.
+  *Main water* tab with valve (light allowed) / wait / auto-close / remind every / remind before a cycle; snooze
+  chips 1 h / 4 h / 12 h call the action, "Reminders snoozed until …" with *Resume reminders*.
 * hassfest 2026.10.1: 0 invalid. `ruff` clean.

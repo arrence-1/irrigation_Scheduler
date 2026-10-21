@@ -74,3 +74,20 @@ open_main_water:
       selector:
         config_entry:
           integration: irrigation_sequencer
+snooze_main_water_reminders:
+  fields:
+    hours:
+      required: true
+      example: 3
+      selector:
+        number:
+          min: 0
+          max: 168
+          step: 0.5
+          unit_of_measurement: h
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer

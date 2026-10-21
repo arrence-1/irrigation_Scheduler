@@ -1,4 +1,4 @@
-"""Actions: run_cycle, stop, skip_tap, run_tap, close_main_water, open_main_water."""
+"""Actions: run_cycle, stop, skip_tap, run_tap, close_main_water, open_main_water, snooze_main_water_reminders."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from .const import (
     SERVICE_RUN_CYCLE,
     SERVICE_RUN_TAP,
     SERVICE_SKIP_TAP,
+    SERVICE_SNOOZE_MAIN,
     SERVICE_STOP,
 )
 
@@ -35,6 +36,7 @@ SCHEMAS = {
     SERVICE_STOP: vol.Schema(BASE),
     SERVICE_CLOSE_MAIN: vol.Schema(BASE),
     SERVICE_OPEN_MAIN: vol.Schema(BASE),
+    SERVICE_SNOOZE_MAIN: vol.Schema({**BASE, vol.Required("hours"): vol.All(vol.Coerce(float), vol.Range(min=0, max=168))}),
     SERVICE_SKIP_TAP: vol.Schema({**BASE, vol.Required("tap"): vol.All(vol.Coerce(int), vol.Range(min=1, max=99))}),
     SERVICE_RUN_TAP: vol.Schema(
         {
@@ -66,10 +68,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         T, C = len(coord.cfg.taps), len(coord.cfg.cycles)
         if call.service == SERVICE_STOP:
             coord.request("service", {"type": "stop"})
-        elif call.service in (SERVICE_CLOSE_MAIN, SERVICE_OPEN_MAIN):
+        elif call.service in (SERVICE_CLOSE_MAIN, SERVICE_OPEN_MAIN, SERVICE_SNOOZE_MAIN):
             if not coord.cfg.main_valve:
                 raise ServiceValidationError("No main water valve is set (Settings: Main water)")
-            coord.request("service", {"type": "close_main" if call.service == SERVICE_CLOSE_MAIN else "open_main"})
+            if call.service == SERVICE_SNOOZE_MAIN:
+                coord.request("service", {"type": "snooze_main", "hours": call.data["hours"]})
+            else:
+                coord.request("service", {"type": "close_main" if call.service == SERVICE_CLOSE_MAIN else "open_main"})
         elif call.service == SERVICE_RUN_CYCLE:
             c = call.data["cycle"]
             if c > C:

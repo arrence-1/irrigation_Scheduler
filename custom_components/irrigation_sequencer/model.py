@@ -57,8 +57,9 @@ DEFAULT_WEATHER = {
 }
 DEFAULT_TAP = {"valve": "", "name": "", "people": [], "soil": "", "soil_pct": 0, "bypass": ""}
 # Main water: the supply valve for every tap. A tap that can't be confirmed off for wait_min minutes raises a
-# critical alert with a "Close main water" button, or (auto_close) closes it straight away.
-DEFAULT_MAIN = {"valve": "", "wait_min": 10, "auto_close": False}
+# critical alert with a "Close main water" button, or (auto_close) closes it straight away. While it is off you are
+# reminded every remind_min minutes (snooze from the notification), and 20 / 10 min before a cycle (remind_cycle).
+DEFAULT_MAIN = {"valve": "", "wait_min": 10, "auto_close": False, "remind_min": 30, "remind_cycle": True}
 
 
 def _int(v: Any, default: int, lo: int | None = None, hi: int | None = None) -> int:
@@ -228,6 +229,8 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
         "valve": _str(m["valve"]),
         "wait_min": _int(m["wait_min"], 10, 1, 240),
         "auto_close": bool(m["auto_close"]),
+        "remind_min": _int(m["remind_min"], 30, 0, 720),
+        "remind_cycle": bool(m["remind_cycle"]),
     }
 
     taps_in = raw.get("taps") or []
@@ -325,6 +328,8 @@ class Cfg:
     main_valve: str = ""
     main_wait_min: int = 10
     main_auto_close: bool = False
+    main_remind_min: int = 30
+    main_remind_cycle: bool = True
 
     def label(self, i: int) -> str:
         """'Tap 1 (Backyard Left)' or 'Tap 1'."""
@@ -351,4 +356,5 @@ def parse(options: dict[str, Any]) -> Cfg:
         n_skips=n["skips"], n_manual=n["manual"], n_people=n["people"],
         n_reminders=n["reminders"], n_rain=n["rain"], hot_c=n["hot_c"],
         main_valve=m["valve"], main_wait_min=m["wait_min"], main_auto_close=m["auto_close"],
+        main_remind_min=m["remind_min"], main_remind_cycle=m["remind_cycle"],
     )

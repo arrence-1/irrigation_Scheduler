@@ -352,6 +352,8 @@ class IrrigationOptionsFlow(OptionsFlow):
                 vol.Optional("valve"): _entity(MAIN_DOMAINS),
                 vol.Required("wait_min"): _num(1, 240, 1, "min"),
                 vol.Required("auto_close"): BooleanSelector(),
+                vol.Required("remind_min"): _num(0, 720, 5, "min"),
+                vol.Required("remind_cycle"): BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="main", data_schema=self.add_suggested_values_to_schema(

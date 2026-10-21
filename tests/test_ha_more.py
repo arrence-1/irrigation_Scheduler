@@ -267,8 +267,9 @@ async def test_settings_websocket_every_group(hass: HomeAssistant, rig: Rig, has
                                  "cold_on": True, "cold_c": 3, "boost_pct": 120})
     assert out["options"]["weather"]["wind_kmh"] == 100  # clamped like the Configure screen's limits
     assert entry.options["weather"]["rain_sensor"] == "sensor.rain"
-    out = await save("main", {"valve": "light.main_water", "wait_min": 500, "auto_close": True})
-    assert out["options"]["main"] == {"valve": "light.main_water", "wait_min": 240, "auto_close": True}
+    out = await save("main", {"valve": "light.main_water", "wait_min": 500, "auto_close": True, "remind_min": 2000})
+    assert out["options"]["main"] == {"valve": "light.main_water", "wait_min": 240, "auto_close": True,
+                                      "remind_min": 720, "remind_cycle": True}
     assert rig.coord.cfg.main_valve == "light.main_water" and rig.coord.cfg.main_auto_close
 
     # bad requests

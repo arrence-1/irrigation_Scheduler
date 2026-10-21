@@ -212,6 +212,8 @@ opt = {
                 "valve": "Main water valve",
                 "wait_min": "Alert after a tap is stuck for",
                 "auto_close": "Close the main water automatically",
+                "remind_min": "While it is off, remind me every",
+                "remind_cycle": "Remind me before a cycle",
             },
             "data_description": {
                 "valve": "Switch, valve, toggle helper or light (some relays show as a light). On = water flowing. "
@@ -219,6 +221,11 @@ opt = {
                 "wait_min": "Counted from the moment a tap could not be confirmed off.",
                 "auto_close": "Off: you are asked (critical alert with a Close main water button). On: the app "
                               "closes it after the wait and tells you.",
+                "remind_min": "Repeats until the main water is on again. Snooze from the notification (press and "
+                              "hold: Snooze 1 h, or Snooze… and type the hours); the reminders start again when the "
+                              "snooze ends. 0 = no reminders.",
+                "remind_cycle": "20 and 10 min before a cycle that would run while the main water is off (also "
+                                "while snoozed).",
             },
         },
         "counts": {
@@ -279,6 +286,12 @@ services = {
         "name": "Open main water",
         "description": "Opens the main water valve again. Waiting cycles then run (late).",
         "fields": {"config_entry_id": entry_field},
+    },
+    "snooze_main_water_reminders": {
+        "name": "Snooze main water reminders",
+        "description": "Pauses the 'main water is off' reminders. They start again when the time is up.",
+        "fields": {"hours": {"name": "Hours", "description": "How long. 0 = remind again now."},
+                   "config_entry_id": entry_field},
     },
     "run_tap": {
         "name": "Run tap",

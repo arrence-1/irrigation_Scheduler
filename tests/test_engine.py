@@ -1002,3 +1002,65 @@ def test_old_saved_state_without_main_fields_loads():
         d.pop(k)
     st, ok = E.State.from_dict(d)
     assert ok and st.stuck_since == 0.0 and st.main_ask is False
+
+
+def test_main_off_reminds_over_and_over_snooze_pauses_then_it_starts_again():
+    o = cyc(opts(2, 1, main={**MAIN, "remind_min": 30}), 0, "06:00", [0, 0])
+    w = world(o, f"{DAY} 08:00")
+    w.at(f"{DAY} 08:05", w.main_to("off"))
+    w.at(f"{DAY} 09:10", w.request({"type": "snooze_main", "hours": 2}))
+    w.at(f"{DAY} 11:50", w.main_to("on"))
+    w.run_until(f"{DAY} 13:00")
+    rem = [x for x in kinds(w) if x[1] == "main_remind"]
+    assert [x[0] for x in rem] == ["08:35:00", "09:05:00", "11:10:00", "11:40:00"], kinds(w)
+    assert "off since Mon 08:05 (30 min)" in rem[0][2] and "(3 h 35 min)" in rem[3][2], rem
+    assert any("snoozed for 2 h, until Mon 11:10" in x[2] for x in kinds(w)), kinds(w)
+    assert (ts(f"{DAY} 11:50"), "main") in w.clears  # back on: the reminder disappears from the phone
+    assert w.state.main_off_since == 0 and w.state.main_snooze_until == 0
+
+
+def test_main_off_reminds_before_a_cycle_even_while_snoozed():
+    o = cyc(opts(2, 1, main={**MAIN, "remind_min": 30}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 04:55")
+    w.at(f"{DAY} 05:00", w.main_to("off"))
+    w.at(f"{DAY} 05:01", w.request({"type": "snooze_main", "hours": 5}))
+    w.run_until(f"{DAY} 06:05")
+    m = kinds(w)
+    pre = [x for x in m if x[1] == "main_cycle"]
+    assert [x[0] for x in pre] == ["05:40:00", "05:50:00"], m
+    assert "Cycle 1 starts at 06:00 (in 20 min) but the main water is off" in pre[0][2]
+    assert not [x for x in m if x[1] == "main_remind"]  # snoozed until 10:01
+    assert (ts(f"{DAY} 06:00"), "main_cycle_1") in w.clears
+    assert w.on_periods(0) == [] and any("Cycle 1 is waiting: the main water is off" in t for t in w.texts("cycle"))
+
+
+def test_main_reminders_switched_off_and_resume_now():
+    o = cyc(opts(2, 1, main={**MAIN, "remind_min": 0, "remind_cycle": False}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 04:00")
+    w.at(f"{DAY} 04:05", w.main_to("off"))
+    w.run_until(f"{DAY} 07:00")
+    assert not [x for x in kinds(w) if x[1] in ("main_remind", "main_cycle")], kinds(w)
+    w.set_options(cyc(opts(2, 1, main={**MAIN, "remind_min": 60}), 0, "06:00", [1, 1]))
+    w.run_until(f"{DAY} 08:02")  # switched on at the 07:01 pass: first reminder one interval later
+    assert [x[0] for x in kinds(w) if x[1] == "main_remind"] == ["08:01:00"], kinds(w)
+    w.at(f"{DAY} 08:10", w.request({"type": "snooze_main", "hours": 3}))
+    w.at(f"{DAY} 08:20", w.request({"type": "snooze_main", "hours": 0}))  # "remind me again now"
+    w.run_until(f"{DAY} 08:30")
+    assert [x[0] for x in kinds(w) if x[1] == "main_remind"] == ["08:01:00", "08:20:00"], kinds(w)
+    assert any("reminders are back on" in x[2] for x in kinds(w))
+
+
+def test_main_reminder_while_a_tap_is_stuck_offers_no_open_button_and_open_by_app_needs_no_clear():
+    o = cyc(opts(2, 1, main={**MAIN, "auto_close": True, "wait_min": 5, "remind_min": 15}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+    w.run_until(f"{DAY} 06:25")
+    m = kinds(w)
+    assert [x[:2] for x in m if x[1].startswith("main_remind")] == [("06:21:00", "main_remind_stuck")], m
+    assert "Tap 1 still can't be confirmed off." in [x for x in m if x[1] == "main_remind_stuck"][0][2]
+    w.valves[0].responds_off = True
+    w.run_until(f"{DAY} 06:40")  # confirmed off at the 06:26 retry; plain reminders from then on
+    w.at(f"{DAY} 06:45", w.request({"type": "open_main"}))
+    w.run_until(f"{DAY} 07:00")
+    assert w.main.state == "on" and (ts(f"{DAY} 06:45"), "main") not in w.clears
+    assert any(x[1] == "main_remind" and x[0] == "06:36:00" for x in kinds(w)), kinds(w)

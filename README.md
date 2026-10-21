@@ -88,7 +88,7 @@ disabling the integration.
 ### Actions (services)
 `irrigation_sequencer.run_cycle` (cycle) · `irrigation_sequencer.stop` · `irrigation_sequencer.skip_tap` (tap) ·
 `irrigation_sequencer.run_tap` (tap, minutes) · `irrigation_sequencer.close_main_water` ·
-`irrigation_sequencer.open_main_water`. *Run cycle* ignores the master / cycle switches and the weather
+`irrigation_sequencer.open_main_water` · `irrigation_sequencer.snooze_main_water_reminders` (hours). *Run cycle* ignores the master / cycle switches and the weather
 and soil checks (it is an explicit "run it now").
 
 ### The dashboard card
@@ -167,7 +167,9 @@ Good sensors to use:
   **Close main water** button (press and hold the notification); with *Close the main water automatically* on, the
   app closes it itself and tells you. While the main water is off, cycles wait (a running tap stops and keeps its
   time) and run, late, once it is on again. The app **never opens** the main water by itself: when the tap reports
-  off you get an **Open main water** button (phone unlocked), also on the card.
+  off you get an **Open main water** button (phone unlocked), also on the card. While it is off you are **reminded
+  every 30 min** (setting) with *Open main water*, *Snooze 1 h* and *Snooze…* (type the hours); the reminders start
+  again when the snooze ends. 20 and 10 min before a cycle that would run you get a reminder too (even when snoozed).
 * **Smart checks** at each cycle start: seasonal %, hot-day boost (≤ 250 % total), rain sensor / weather /
   forecast chance / forecast mm / wind / cold skips (one switch for all), soil per tap, people guard per tap.
 * **Bypass (pressure washer).** While a tap's bypass switch is on, that tap is left alone (no timer) and cycles
@@ -192,6 +194,8 @@ tag so a newer message replaces the older one; messages with the same tag in one
 | Started raining | Started raining | `irrigation_rain` |
 | Tap fault (time-sensitive on iOS) | always | `irrigation_tap_N` |
 | Tap won't close: close the main water? (**critical**, with **Close main water** button) / closed / open again (with **Open main water** button) | always (needs a main water valve) | `irrigation_main` |
+| Main water is off: every 30 min, with **Open main water**, **Snooze 1 h**, **Snooze…** (type hours) | *While it is off, remind me every* | `irrigation_main` |
+| Cycle N starts in 20 / 10 min but the main water is off (**Open main water** button; cleared later) | *Remind me before a cycle* | `irrigation_main_cycle_N` |
 | Recovered after restart / reload | always | `irrigation_recovery` |
 | Settings warnings | always | `irrigation_config` |
 

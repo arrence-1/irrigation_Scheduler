@@ -446,14 +446,20 @@ class IrrigationSchedulerCard extends HTMLElement {
     const label = want === "close"
       ? (armed ? "Tap again to close" : "Close main water")
       : (armed ? "Tap again to open" : "Open main water");
-    const text = stuck
+    const snoozed = off && a.main_snoozed_until ? ` Reminders snoozed until ${dayWord(a.main_snoozed_until)} ${hhmm(a.main_snoozed_until)}.` : "";
+    const text = (stuck
       ? `${esc(a.tap_name || "A tap")} can't be confirmed off.${off ? " The main water is off." : on ? "" : " Main water valve: " + esc(s ? s.state : "not found") + "."}`
-      : "The main water is off: cycles wait until it is on again.";
+      : "The main water is off: cycles wait until it is on again.") + snoozed;
+    // snooze the "main water is off" reminders (they start again when the time is up)
+    const snooze = !off ? "" : a.main_snoozed_until
+      ? `<button class="chip" data-act="snooze" data-v="0" title="Remind me again now">Resume reminders</button>`
+      : `<span class="lab">Snooze</span>${[1, 4, 12].map((h) => `<button class="chip" data-act="snooze" data-v="${h}"
+          title="No 'main water is off' reminders for ${h} h">${h} h</button>`).join("")}`;
     const btn = (stuck && off) || (!on && !off) ? "" // stuck with the water already off: fix the tap first
       : `<button class="act ${want === "close" ? "stop" : ""} ${armed ? "armed" : ""}" data-act="main" data-v="${want}"
           title="${want === "close" ? "Closes the main water valve" : "Opens the main water valve again"}">${label}</button>`;
     return `<div class="mainrow ${stuck ? "alert" : ""}"><ha-icon icon="${off ? "mdi:water-off" : "mdi:alert"}"></ha-icon>
-      <span class="grow">${text}</span>${btn}</div>`;
+      <span class="grow">${text}</span>${snooze ? `<span class="snz">${snooze}</span>` : ""}${btn}</div>`;
   }
 
   _editor() {
@@ -595,6 +601,9 @@ class IrrigationSchedulerCard extends HTMLElement {
       case "stop":
         this._call(DOMAIN, "stop", { config_entry_id: cfg.entry_id });
         break;
+      case "snooze":
+        this._call(DOMAIN, "snooze_main_water_reminders", { hours: Number(el.dataset.v), config_entry_id: cfg.entry_id });
+        break;
       case "main": { // two taps: the first arms the button for 5 s, the second acts
         const want = el.dataset.v;
         clearTimeout(this._mainTimer);
@@ -700,7 +709,10 @@ const CSS = `
   .mainrow { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; padding: 6px 10px; border-radius: 10px;
     font-size: .85em; background: color-mix(in srgb, var(--warning-color, #ffa600) 16%, transparent); --mdc-icon-size: 18px; }
   .mainrow.alert { background: color-mix(in srgb, var(--error-color, #db4437) 16%, transparent); }
+  .mainrow { flex-wrap: wrap; }
   .mainrow .act { flex: none; background: var(--card-background-color, #fff); }
+  .mainrow .snz { display: inline-flex; align-items: center; gap: 4px; }
+  .mainrow .chip { background: var(--card-background-color, #fff); }
   .act.armed { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: #fff; }
   .last { margin: 2px 2px 0; color: var(--secondary-text-color); font-size: .78em; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; flex-wrap: wrap; }
@@ -885,6 +897,8 @@ const GROUPS = {
     { name: "valve", selector: S.ent(["switch", "valve", "input_boolean", "light"]) },
     { name: "wait_min", selector: S.num(1, 240, 1, "min") },
     { name: "auto_close", selector: S.bool },
+    { name: "remind_min", selector: S.num(0, 720, 5, "min") },
+    { name: "remind_cycle", selector: S.bool },
   ] },
   counts: { label: "Taps & cycles", group: "counts", step: "counts", schema: [
     { name: "tap_count", selector: S.num(1, 16) },

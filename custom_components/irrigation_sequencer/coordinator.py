@@ -57,6 +57,24 @@ _LOGGER = logging.getLogger(__name__)
 _REVS = itertools.count(int(time.time()))
 
 
+def parse_hours(text: Any) -> float | None:
+    """Snooze length typed on the phone: '3', '1.5', '2h', '90m', '90 min' -> hours (0-168), else None."""
+    if not isinstance(text, str):
+        return None
+    s = text.strip().lower().replace(",", ".")
+    mult = 1.0
+    for suffix, m in (("minutes", 1 / 60), ("mins", 1 / 60), ("min", 1 / 60), ("m", 1 / 60),
+                      ("hours", 1.0), ("hrs", 1.0), ("hr", 1.0), ("h", 1.0)):
+        if s.endswith(suffix):
+            s, mult = s[: -len(suffix)].strip(), m
+            break
+    try:
+        v = float(s) * mult
+    except ValueError:
+        return None
+    return v if 0 <= v <= 168 else None
+
+
 def _float(state_str: Any) -> float | None:
     try:
         v = float(state_str)
@@ -196,6 +214,16 @@ class IrrigationCoordinator:
             self.request("action", {"type": "close_main"})
         elif action == f"{prefix}_main_open":
             self.request("action", {"type": "open_main"})
+        elif action == f"{prefix}_main_snooze_1":
+            self.request("action", {"type": "snooze_main", "hours": 1})
+        elif action == f"{prefix}_main_snooze":
+            hours = parse_hours(event.data.get("reply_text"))
+            if hours is None:
+                self._startup_msgs.append(("main", 0, f"Couldn't read \"{event.data.get('reply_text') or ''}\" as "
+                                                      "hours (try 3, 1.5 or 90m); reminders are not snoozed."))
+                self.request("action")
+            else:
+                self.request("action", {"type": "snooze_main", "hours": hours})
 
     # ------------------------------------------------------------------
     # Requests from entities, services, the card
@@ -679,6 +707,7 @@ class IrrigationCoordinator:
             "master": st.master,
             # main water valve: on / off / offline, None when not set
             "main_water": (self.snapshot.main if self.snapshot and cfg.main_valve else None),
+            "main_snoozed_until": iso(st.main_snooze_until) if st.main_snooze_until > time.time() else None,
             "seasonal": st.seasonal,
             "config_rev": self.config_rev,
             "last_message": self.messages[-1]["message"] if self.messages else None,

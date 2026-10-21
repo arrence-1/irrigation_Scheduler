@@ -33,13 +33,33 @@ TITLES = {
     "hot": "Too hot",
     "rain": "Raining",
     "main": "Main water",
+    "main_cycle": "Cycle {n}: main water off",
 }
-NUMBERED = ("cycle", "reminder", "tap", "people")
-# main water messages share one tag, so each replaces the one before (alert -> closed -> open again)
-MAIN_KINDS = ("main", "main_alert", "main_auto", "main_open")
+NUMBERED = ("cycle", "reminder", "tap", "people", "main_cycle")
+# main water messages share one tag, so each replaces the one before (alert -> closed -> reminders -> open again)
+MAIN_KINDS = ("main", "main_alert", "main_auto", "main_open", "main_remind", "main_remind_stuck")
 # iOS: a critical alert sounds even on silent / Do Not Disturb (the Companion app asks for this permission)
 CRITICAL = ("main_alert", "main_auto")
-TIME_SENSITIVE = ("tap", "main", "main_open")
+TIME_SENSITIVE = ("tap", "main", "main_open", "main_remind", "main_remind_stuck", "main_cycle")
+
+
+def _main_buttons(prefix: str, kind: str) -> list[dict[str, Any]]:
+    """iOS shows these when you press and hold the notification."""
+    opener = {"action": f"{prefix}_main_open", "title": "Open main water", "authenticationRequired": True}
+    snooze = [
+        {"action": f"{prefix}_main_snooze_1", "title": "Snooze 1 h"},
+        {"action": f"{prefix}_main_snooze", "title": "Snooze…", "behavior": "textInput",
+         "textInputButtonTitle": "Snooze", "textInputPlaceholder": "Hours, e.g. 3"},
+    ]
+    if kind == "main_alert":  # closing is the safe direction: no unlock needed
+        return [{"action": f"{prefix}_main_close", "title": "Close main water", "destructive": True}]
+    if kind in ("main_open", "main_remind"):  # opening lets water flow again: the phone must be unlocked
+        return [opener, *snooze]
+    if kind == "main_remind_stuck":  # a tap may still be open: no Open button here
+        return snooze
+    if kind == "main_cycle":
+        return [opener]
+    return []
 
 
 def tag_for(prefix: str, kind: str, n: int) -> str:
@@ -77,11 +97,8 @@ def build_outbox(cfg: Cfg, msgs: list[tuple[str, int, str]], master_on: bool) ->
         data: dict[str, Any] = {"group": prefix, "tag": tag, "push": _push(prefix, kind)}
         if kind in ("reminder", "hot") and not master_on:
             data["actions"] = [{"action": f"{prefix}_master_on", "title": "Turn master switch on"}]
-        elif kind == "main_alert":  # closing is the safe direction: no unlock needed
-            data["actions"] = [{"action": f"{prefix}_main_close", "title": "Close main water", "destructive": True}]
-        elif kind == "main_open":  # opening lets water flow again: the phone must be unlocked
-            data["actions"] = [{"action": f"{prefix}_main_open", "title": "Open main water",
-                                "authenticationRequired": True}]
+        elif buttons := _main_buttons(prefix, kind):
+            data["actions"] = buttons
         title_kind = "main" if kind in MAIN_KINDS else kind
         out[tag] = {
             "title": f"{title_prefix} - " + TITLES.get(title_kind, title_kind.title()).format(n=n),

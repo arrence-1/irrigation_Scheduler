@@ -57,15 +57,25 @@ function hass(status, attrs, main) {
   row = root.querySelector(".mainrow");
   console.log("off row:", row.textContent.replace(/\s+/g, " ").trim());
   console.log("pill:", root.querySelector(".pill").textContent.trim());
-  if (!/main water is off/.test(row.textContent) || row.querySelector("button").textContent.trim() !== "Open main water") fail("open row");
+  if (!/main water is off/.test(row.textContent) || row.querySelector('button[data-act="main"]').textContent.trim() !== "Open main water") fail("open row");
   if (root.querySelector(".pill").textContent.trim() !== "Held") fail("pill");
-  row.querySelector("button").click(); await tick(); root.querySelector(".mainrow button").click(); await tick();
+  const chips = [...row.querySelectorAll('button[data-act="snooze"]')].map((b) => b.textContent.trim());
+  console.log("snooze chips:", chips.join(" | "));
+  if (chips.join() !== "1 h,4 h,12 h") fail("snooze chips");
+  row.querySelector('button[data-act="snooze"][data-v="4"]').click(); await tick();
+  if (JSON.stringify(calls[1]) !== JSON.stringify(["irrigation_sequencer", "snooze_main_water_reminders", { hours: 4, config_entry_id: "E1" }])) fail("snooze call " + JSON.stringify(calls[1]));
+  calls.splice(1);
+  root.querySelector('.mainrow button[data-act="main"]').click(); await tick(); root.querySelector('.mainrow button[data-act="main"]').click(); await tick();
   if (calls[1][1] !== "open_main_water") fail("open call");
+  card.hass = hass("held", { pending: [{ cycle: 1 }], main_snoozed_until: "2026-10-21T15:00:00+11:00" }, "off"); await tick();
+  row = root.querySelector(".mainrow");
+  console.log("snoozed row:", row.textContent.replace(/\s+/g, " ").trim());
+  if (!/Reminders snoozed until/.test(row.textContent) || !row.querySelector('button[data-v="0"]')) fail("snoozed row");
   // stuck with main already off: no button
   card.hass = hass("stuck", { tap: 1, tap_name: "Tap 1 (BL)" }, "off"); await tick();
   row = root.querySelector(".mainrow");
-  console.log("stuck+off row:", row.textContent.replace(/\s+/g, " ").trim(), "| buttons:", row.querySelectorAll("button").length);
-  if (row.querySelectorAll("button").length) fail("no button when stuck and off");
+  console.log("stuck+off row:", row.textContent.replace(/\s+/g, " ").trim(), "| open/close:", row.querySelectorAll('button[data-act="main"]').length);
+  if (row.querySelectorAll('button[data-act="main"]').length) fail("no open/close button when stuck and off (snooze only)");
   // main on and idle: no row
   card.hass = hass("idle", {}, "on"); await tick();
   if (root.querySelector(".mainrow")) fail("row when all fine");
@@ -80,7 +90,7 @@ function hass(status, attrs, main) {
   set.shadowRoot.querySelector('.tab[data-v="main"]').click(); await tick();
   const form = set.shadowRoot.querySelector("ha-form");
   console.log("main form fields:", form.schema.map((f) => f.name).join(","), JSON.stringify(form.data));
-  if (form.schema.map((f) => f.name).join(",") !== "valve,wait_min,auto_close") fail("schema");
+  if (form.schema.map((f) => f.name).join(",") !== "valve,wait_min,auto_close,remind_min,remind_cycle") fail("schema");
   if (!form.schema[0].selector.entity.filter.domain.includes("light")) fail("light domain");
   console.log("CARD TESTS OK");
   process.exit(0);

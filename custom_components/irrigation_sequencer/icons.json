@@ -33,6 +33,7 @@
     "skip_tap": { "service": "mdi:skip-next" },
     "run_tap": { "service": "mdi:hand-water" },
     "close_main_water": { "service": "mdi:water-off" },
-    "open_main_water": { "service": "mdi:water-pump" }
+    "open_main_water": { "service": "mdi:water-pump" },
+    "snooze_main_water_reminders": { "service": "mdi:bell-sleep" }
   }
 }

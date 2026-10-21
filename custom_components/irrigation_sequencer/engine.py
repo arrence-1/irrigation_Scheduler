@@ -86,6 +86,11 @@ class State:
     main_ask: bool = False  # the "Close main water?" alert is showing
     main_prompt: bool = False  # the "Open main water?" prompt is showing
     main_note: bool = False  # "held: main water off" was announced
+    main_off_since: float = 0.0  # when the main water was first seen off (0 = on / not set)
+    main_remind_at: float = 0.0  # next "the main water is off" reminder
+    main_snooze_until: float = 0.0  # reminders snoozed until then
+    main_reminded: bool = False  # a reminder is showing
+    main_cycle_rem: dict[str, list[float]] = field(default_factory=dict)  # cycle -> [occurrence ts, level]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -115,8 +120,11 @@ class State:
             ]
             st.seasonal = float(st.seasonal)
             st.stuck_since = float(st.stuck_since)
-            for k in ("main_alerted", "main_ask", "main_prompt", "main_note"):
+            for k in ("main_alerted", "main_ask", "main_prompt", "main_note", "main_reminded"):
                 setattr(st, k, bool(getattr(st, k)))
+            for k in ("main_off_since", "main_remind_at", "main_snooze_until"):
+                setattr(st, k, float(getattr(st, k)))
+            st.main_cycle_rem = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.main_cycle_rem).items()}
             st.reminders = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.reminders).items()}
         except (TypeError, ValueError, KeyError, IndexError):
             fresh = cls()
@@ -178,6 +186,17 @@ def _hm(ts: float, tz: tzinfo) -> str:
 
 def _dhm(ts: float, tz: tzinfo) -> str:
     return datetime.fromtimestamp(ts, tz).strftime("%a %H:%M")
+
+
+def _dur(s: float) -> str:
+    """'45 min', '2 h 5 min', '1 day 3 h'."""
+    m = max(int(s // 60), 0)
+    if m < 60:
+        return f"{m} min"
+    if m < 1440:
+        return f"{m // 60} h" + (f" {m % 60} min" if m % 60 else "")
+    d = m // 1440
+    return f"{d} day{'s' if d > 1 else ''}" + (f" {(m % 1440) // 60} h" if (m % 1440) // 60 else "")
 
 
 def _g(x: float) -> str:
@@ -254,6 +273,7 @@ def fit(st: State, cfg: Cfg) -> None:
             st.mode, st.tap, st.end = IDLE, -1, 0.0
     st.pending = [p for p in st.pending if 0 <= p["cycle"] < C]
     st.reminders = {k: v for k, v in st.reminders.items() if k.isdigit() and int(k) < C}
+    st.main_cycle_rem = {k: v for k, v in st.main_cycle_rem.items() if k.isdigit() and int(k) < C}
 
 
 def _reset_cycle(st: State, T: int) -> None:
@@ -416,6 +436,20 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
                     st.pending.insert(0, {"cycle": ci, "due": int(now // 60), "forced": True})
         elif kind == "run_tap":
             run_tap_req = req
+        elif kind == "snooze_main" and cfg.main_valve:
+            hours = max(float(req.get("hours", 0) or 0), 0.0)
+            if sn.main != V_OFF:
+                msg(("main", 0, "The main water is on: there is nothing to snooze."))
+            elif hours <= 0:
+                st.main_snooze_until = 0.0
+                st.main_remind_at = now
+                msg(("main", 0, "Main water reminders are back on."))
+            else:
+                st.main_snooze_until = now + hours * 3600
+                st.main_remind_at = max(st.main_remind_at, st.main_snooze_until)
+                st.main_reminded = False
+                msg(("main", 0, f"Main water reminders snoozed for {_g(round(hours, 2))} h, until "
+                                f"{_dhm(st.main_snooze_until, tz)}. The main water is still off."))
         elif kind in ("close_main", "open_main") and cfg.main_valve:
             want_off = kind == "close_main"
             if sn.main == (V_OFF if want_off else V_ON):
@@ -595,6 +629,34 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
         msg(("main", 0, f"The main water is off ({hm})."
              + (f" {lbl(st.tap)} still can't be confirmed off; it is checked every 5 min." if st.mode == STUCK else "")))
 
+    # main water off: remind every remind_min minutes (unless snoozed); forget it all once it is on again
+    remind_s = max(cfg.main_remind_min, 0) * 60
+    if cfg.main_valve and sn.main == V_OFF:
+        if not st.main_off_since:
+            st.main_off_since = now
+            st.main_remind_at = now + remind_s if remind_s else 0.0
+        if remind_s and not st.main_remind_at:
+            st.main_remind_at = now + remind_s  # reminders were just switched on
+        if remind_s and now >= st.main_remind_at - 1 and now >= st.main_snooze_until - 1:
+            st.main_reminded = True
+            st.main_remind_at = now + remind_s
+            waiting = ([st.cycle] if st.cycle >= 0 else []) + [p["cycle"] for p in st.pending]
+            stuck_txt = f" {lbl(st.tap)} still can't be confirmed off." if st.mode == STUCK else ""
+            msg(("main_remind_stuck" if st.mode == STUCK else "main_remind", 0,
+                 f"The main water has been off since {_dhm(st.main_off_since, tz)} ({_dur(now - st.main_off_since)})."
+                 + (f" Waiting: cycle {', '.join(str(c + 1) for c in waiting)}." if waiting else "")
+                 + stuck_txt + " Press and hold to " + ("snooze" if st.mode == STUCK else "open it or snooze")
+                 + " these reminders."))
+    elif sn.main == V_ON and st.main_off_since:
+        st.main_off_since = st.main_remind_at = st.main_snooze_until = 0.0
+        if st.main_reminded:
+            st.main_reminded = False
+            if "main" not in plan.clear:
+                plan.clear.append("main")
+    elif not cfg.main_valve:
+        st.main_off_since = st.main_remind_at = st.main_snooze_until = 0.0
+        st.main_reminded = False
+
     # bypass: hold the cycle while any tap's bypass is on (the washer gets full pressure)
     if held and st.mode == WATERING:
         close(st.tap)
@@ -630,6 +692,7 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
 
     # ---------- 7. reminders, alerts, restart summary ----------
     _reminders(st, cfg, sn, plan, occ_next)
+    _main_cycle_reminders(st, cfg, sn, plan, occ_next)
     _alerts(st, cfg, sn, plan, occ_next)
     if startup and (loaded[0] != IDLE or loaded[4] > 0):
         _recovery(st, cfg, sn, plan, loaded)
@@ -859,6 +922,29 @@ def _reminders(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[flo
                                                  f"(in {max(int(round(d / 60)), 1)} min) but the master switch is off."))
 
 
+def _main_cycle_reminders(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[float]) -> None:
+    """Main water off: remind 20 and 10 min before a cycle that would run (not affected by a snooze)."""
+    now = sn.now
+    for k, (occ, _lvl) in list(st.main_cycle_rem.items()):
+        if now >= occ or sn.main != V_OFF:
+            plan.clear.append(f"main_cycle_{int(k) + 1}")
+            del st.main_cycle_rem[k]
+    if not (cfg.main_valve and cfg.main_remind_cycle and sn.main == V_OFF and st.master):
+        return
+    for i, occ in enumerate(occ_next):
+        if occ <= 0 or not st.cycle_on[i] or not cycle_has_water(cfg, i):
+            continue
+        d = occ - now
+        sent = st.main_cycle_rem.get(str(i))
+        lvl_sent = sent[1] if sent and sent[0] == occ else 0
+        level = 10 if d <= 630 else (20 if d <= 1230 else 0)
+        if level and (lvl_sent == 0 or level < lvl_sent):
+            st.main_cycle_rem[str(i)] = [occ, float(level)]
+            plan.msgs.append(("main_cycle", i + 1, f"Cycle {i + 1} starts at {_hm(occ, sn.tz)} "
+                                                   f"(in {max(int(round(d / 60)), 1)} min) but the main water is off: "
+                                                   "it will wait until the main water is on."))
+
+
 def _alerts(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[float]) -> None:
     now = sn.now
     # too hot for 10 min: one alert (re-armed when it drops 1 °C below the limit)
@@ -938,6 +1024,13 @@ def next_wake(st: State, cfg: Cfg, sn: Snapshot, occ_next: list[float] | None = 
         cands.append(now + 1)
     if st.mode == STUCK and cfg.main_valve and not st.main_alerted and st.stuck_since:
         cands.append(st.stuck_since + cfg.main_wait_min * 60)
+    if cfg.main_valve and sn.main == V_OFF:
+        if st.main_remind_at:
+            cands.append(max(st.main_remind_at, st.main_snooze_until))
+        if cfg.main_remind_cycle and st.master:
+            for i, o in enumerate(occ_next):
+                if o > 0 and st.cycle_on[i]:
+                    cands += [o - 1200, o - 600]
     cands += [o for o in occ_next if o > 0]
     if not st.master:
         for i, o in enumerate(occ_next):
@@ -985,7 +1078,7 @@ def on_main_done(st: State, cfg: Cfg, action: str, ok: bool, now: float, tz: tzi
         return [("main_alert", 0, f"Could not confirm the main water is off ({hm}). Check it, or try again: press and "
                                   f"hold this notification.{stuck}")]
     if ok:
-        st.main_prompt = False
+        st.main_prompt = st.main_reminded = False
         return [("main", 0, f"Main water open again at {hm}."
                  + (f" Note:{stuck}" if stuck else "") + (" Waiting cycles carry on." if st.pending or st.cycle >= 0 else ""))]
     return [("main_open", 0, f"Could not confirm the main water is on ({hm}). Check it, or try again: press and hold "

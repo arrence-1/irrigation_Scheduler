@@ -10,15 +10,21 @@
   and tells you.
 * **While the main water is off** (closed by the app or by hand) cycles wait, and a running tap stops and keeps its
   time; they carry on, late, when it is on again. The status shows *Held*.
+* **Reminders while the main water is off:** every 30 min (*While it is off, remind me every*; 0 = never) until it
+  is on again, with **Open main water**, **Snooze 1 h** and **Snooze…** (type the hours: 3, 1.5, 90m) when you
+  press and hold. When the snooze ends the reminders start again. The card has *Snooze 1 h / 4 h / 12 h* and
+  *Resume reminders*; the action `irrigation_sequencer.snooze_main_water_reminders` does the same.
+* **Before a cycle:** 20 and 10 min before a cycle that would run while the main water is off, a reminder with an
+  **Open main water** button (*Remind me before a cycle*; also while snoozed).
 * **The app never opens the main water by itself.** Once the stuck tap reports off you get a notification with an
   **Open main water** button (needs the phone unlocked), and the card offers the same.
-* New actions `irrigation_sequencer.close_main_water` and `open_main_water`; the status sensor has a `main_water`
-  attribute (on / off / offline).
+* New actions `irrigation_sequencer.close_main_water`, `open_main_water` and `snooze_main_water_reminders`; the status
+  sensor has `main_water` (on / off / offline) and `main_snoozed_until` attributes.
 * **Card:** a row with the Close / Open main water button when a tap is stuck or the main water is off (tap twice:
   the first tap arms it for 5 s). The status pill says *Held* for both the bypass and the main water.
 * The card's address carries a fingerprint of the card file as well as the version (`?v=1.4.0-…`), so a changed card
   always loads fresh after a restart, also while testing a build that keeps its version number.
-* Tests: 9 new engine scenarios, 2 new Home Assistant tests, and card checks without a browser (jsdom) in CI.
+* Tests: 13 new engine scenarios, 3 new Home Assistant tests, and card checks without a browser (jsdom) in CI.
 
 ## 1.3.3 (13 Oct 2026) — renamed Irrigation Scheduler
 
