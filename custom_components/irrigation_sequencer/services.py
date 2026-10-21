@@ -1,4 +1,4 @@
-"""Actions: run_cycle, stop, skip_tap, run_tap."""
+"""Actions: run_cycle, stop, skip_tap, run_tap, close_main_water, open_main_water."""
 
 from __future__ import annotations
 
@@ -14,7 +14,15 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, SERVICE_RUN_CYCLE, SERVICE_RUN_TAP, SERVICE_SKIP_TAP, SERVICE_STOP
+from .const import (
+    DOMAIN,
+    SERVICE_CLOSE_MAIN,
+    SERVICE_OPEN_MAIN,
+    SERVICE_RUN_CYCLE,
+    SERVICE_RUN_TAP,
+    SERVICE_SKIP_TAP,
+    SERVICE_STOP,
+)
 
 if TYPE_CHECKING:
     from .coordinator import IrrigationCoordinator
@@ -25,6 +33,8 @@ BASE = {vol.Optional(ATTR_ENTRY): cv.string}
 SCHEMAS = {
     SERVICE_RUN_CYCLE: vol.Schema({**BASE, vol.Required("cycle"): vol.All(vol.Coerce(int), vol.Range(min=1, max=99))}),
     SERVICE_STOP: vol.Schema(BASE),
+    SERVICE_CLOSE_MAIN: vol.Schema(BASE),
+    SERVICE_OPEN_MAIN: vol.Schema(BASE),
     SERVICE_SKIP_TAP: vol.Schema({**BASE, vol.Required("tap"): vol.All(vol.Coerce(int), vol.Range(min=1, max=99))}),
     SERVICE_RUN_TAP: vol.Schema(
         {
@@ -56,6 +66,10 @@ def async_register_services(hass: HomeAssistant) -> None:
         T, C = len(coord.cfg.taps), len(coord.cfg.cycles)
         if call.service == SERVICE_STOP:
             coord.request("service", {"type": "stop"})
+        elif call.service in (SERVICE_CLOSE_MAIN, SERVICE_OPEN_MAIN):
+            if not coord.cfg.main_valve:
+                raise ServiceValidationError("No main water valve is set (Settings: Main water)")
+            coord.request("service", {"type": "close_main" if call.service == SERVICE_CLOSE_MAIN else "open_main"})
         elif call.service == SERVICE_RUN_CYCLE:
             c = call.data["cycle"]
             if c > C:

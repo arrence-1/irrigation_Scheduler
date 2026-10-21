@@ -60,3 +60,17 @@ run_tap:
       selector:
         config_entry:
           integration: irrigation_sequencer
+close_main_water:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer
+open_main_water:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer

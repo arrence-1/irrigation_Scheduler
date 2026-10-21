@@ -148,3 +148,18 @@ unchanged). 96 / 96 tests on Home Assistant 2026.10.1, hassfest 0 invalid, `ruff
 (`node --check`), `translations/en.json` regenerated (only the titles changed), `release_check` OK.
 Card address fingerprint: `_card_tag()` gives `1.3.3-a2fc7506`; the resource and the Irrigation page both use
 it (the two tests that check the address now expect it).
+
+## 1.4.0 (21 Oct 2026) — main water valve
+* **106 / 106 tests pass on Home Assistant 2026.10.1** (was 96). New engine scenarios: stuck tap → critical alert
+  after the wait (once) → *Close main water* pressed → tap fixed → *Open main water* prompt, never re-opened by the
+  app, cycle waits and carries on after you open it; automatic close; main water closed by hand answers the alert;
+  main water off holds cycles (run late) and pauses a running tap (keeps its time); no main valve = no change;
+  requests when already there; old saved state loads.
+* New Home Assistant tests: the Main water Configure screen (set, then cleared), the settings websocket group
+  (clamped like the screen), the alert's payload (critical sound, `irrigation_main` tag, *Close main water*
+  destructive button), the phone's action closing a **light** entity, the *Open main water* prompt (needs unlock),
+  status *held* while it waits, both actions (`close_main_water`, `open_main_water`, error without a valve).
+* Card (jsdom, also in CI): stuck → *Close main water* row, two-tap arming, service called with the entry; main off →
+  *Open main water*, pill *Held*; stuck with the water already off → no button; all fine → no row; the settings'
+  *Main water* tab with valve (light allowed) / wait / auto-close.
+* hassfest 2026.10.1: 0 invalid. `ruff` clean.

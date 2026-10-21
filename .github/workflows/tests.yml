@@ -29,6 +29,10 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest -q
+      - name: Card (jsdom)
+        run: |
+          npm install --no-save --silent jsdom@26
+          node tests/card/test_card.js custom_components/irrigation_sequencer/frontend/irrigation-sequencer-card.js
 
   newest:
     name: Newest Home Assistant

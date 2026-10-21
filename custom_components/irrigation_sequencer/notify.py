@@ -32,13 +32,26 @@ TITLES = {
     "config": "Settings",
     "hot": "Too hot",
     "rain": "Raining",
+    "main": "Main water",
 }
 NUMBERED = ("cycle", "reminder", "tap", "people")
+# main water messages share one tag, so each replaces the one before (alert -> closed -> open again)
+MAIN_KINDS = ("main", "main_alert", "main_auto", "main_open")
+# iOS: a critical alert sounds even on silent / Do Not Disturb (the Companion app asks for this permission)
+CRITICAL = ("main_alert", "main_auto")
+TIME_SENSITIVE = ("tap", "main", "main_open")
 
 
 def tag_for(prefix: str, kind: str, n: int) -> str:
-    kind = "cycle" if kind == "skip" else kind
+    kind = "cycle" if kind == "skip" else ("main" if kind in MAIN_KINDS else kind)
     return f"{prefix}_{kind}" + (f"_{n}" if kind in NUMBERED else "")
+
+
+def _push(prefix: str, kind: str) -> dict[str, Any]:
+    if kind in CRITICAL:
+        return {"thread-id": prefix, "interruption-level": "critical",
+                "sound": {"name": "default", "critical": 1, "volume": 1.0}}
+    return {"thread-id": prefix, "interruption-level": "time-sensitive" if kind in TIME_SENSITIVE else "active"}
 
 
 def build_outbox(cfg: Cfg, msgs: list[tuple[str, int, str]], master_on: bool) -> list[dict[str, Any]]:
@@ -61,15 +74,17 @@ def build_outbox(cfg: Cfg, msgs: list[tuple[str, int, str]], master_on: bool) ->
         if tag in out:
             out[tag]["message"] += " " + text
             continue
-        data: dict[str, Any] = {
-            "group": prefix,
-            "tag": tag,
-            "push": {"thread-id": prefix, "interruption-level": "time-sensitive" if kind == "tap" else "active"},
-        }
+        data: dict[str, Any] = {"group": prefix, "tag": tag, "push": _push(prefix, kind)}
         if kind in ("reminder", "hot") and not master_on:
             data["actions"] = [{"action": f"{prefix}_master_on", "title": "Turn master switch on"}]
+        elif kind == "main_alert":  # closing is the safe direction: no unlock needed
+            data["actions"] = [{"action": f"{prefix}_main_close", "title": "Close main water", "destructive": True}]
+        elif kind == "main_open":  # opening lets water flow again: the phone must be unlocked
+            data["actions"] = [{"action": f"{prefix}_main_open", "title": "Open main water",
+                                "authenticationRequired": True}]
+        title_kind = "main" if kind in MAIN_KINDS else kind
         out[tag] = {
-            "title": f"{title_prefix} - " + TITLES.get(kind, kind.title()).format(n=n),
+            "title": f"{title_prefix} - " + TITLES.get(title_kind, title_kind.title()).format(n=n),
             "message": text,
             "data": data,
         }

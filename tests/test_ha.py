@@ -10,6 +10,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_mock_service
 
 from custom_components.irrigation_sequencer.const import DOMAIN
+from custom_components.irrigation_sequencer.model import normalize
 
 from .conftest import Rig, local, make_options
 
@@ -152,6 +153,10 @@ async def test_options_flow_every_screen(hass: HomeAssistant, rig: Rig) -> None:
         ("weather", {"on": True, "rain_sensor": "sensor.rain", "rain_mm": 4, "fc_prob": 60, "fc_mm": 3,
                      "wind_kmh": 30, "cold_on": True, "cold_c": 3, "boost_pct": 120},
          lambda o: o["weather"]["rain_sensor"] == "sensor.rain" and o["weather"]["weather_entity"] == ""),
+        ("main", {"valve": "light.main_water", "wait_min": 15, "auto_close": True},
+         lambda o: o["main"] == {"valve": "light.main_water", "wait_min": 15, "auto_close": True}),
+        ("main", {"wait_min": 10, "auto_close": False},  # valve cleared
+         lambda o: o["main"] == {"valve": "", "wait_min": 10, "auto_close": False}),
     ]:
         r = await open_menu(step)
         assert r["type"] is FlowResultType.FORM, step
@@ -381,6 +386,110 @@ async def test_stuck_valve(hass: HomeAssistant, rig: Rig, monkeypatch) -> None:
     assert hass.states.is_state("input_boolean.tap_1", "off")
     assert rig.periods("input_boolean.tap_2"), rig.log
     assert rig.max_open == 1 and rig.app_max_open == 1
+
+
+async def _main_light(hass: HomeAssistant, state: str = "on") -> list[str]:
+    """A main water valve that shows as a light (as a ZHA relay does); returns the calls it got."""
+    calls: list[str] = []
+    hass.states.async_set("light.main_water", state, {"friendly_name": "Main water"})
+
+    async def handle(call) -> None:
+        calls.append(call.service)
+        hass.states.async_set("light.main_water", "on" if call.service == "turn_on" else "off")
+
+    for svc in ("turn_on", "turn_off"):
+        hass.services.async_register("light", svc, handle)
+    return calls
+
+
+async def test_stuck_tap_main_water_alert_buttons_and_actions(hass: HomeAssistant, rig: Rig, monkeypatch) -> None:
+    import custom_components.irrigation_sequencer.coordinator as C
+
+    calls = await _main_light(hass)
+    o = cycle(make_options(rig.phone_id, general={"confirm_s": 5}, main={"valve": "light.main_water", "wait_min": 2}),
+              0, "06:00", [1, 1, 0])
+    await rig.setup_entry(o)
+    await master_on(hass, rig)
+    coord = rig.coord
+    real = coord._service
+    broken = {"input_boolean.tap_1"}
+
+    async def service(entity_id: str, on: bool) -> None:
+        if not on and entity_id in broken:
+            return
+        await real(entity_id, on)
+
+    monkeypatch.setattr(coord, "_service", service)
+    monkeypatch.setattr(C, "CLOSE_TRIES", 1)
+
+    async def fast_wait(entity_id, on, timeout):
+        return coord._is(entity_id, on)
+
+    monkeypatch.setattr(coord, "_wait_for", fast_wait)
+    await rig.goto("2026-10-12 06:02")
+    assert hass.states.get("sensor.irrigation_status").state == "stuck"
+    fault = rig.messages("irrigation_tap_1")
+    assert fault and "you'll be asked to close the main water" in fault[0]
+    assert not rig.messages("irrigation_main")
+    await rig.goto("2026-10-12 06:04", step_s=10)
+
+    main = [c.data for c in rig.notes if c.data["data"].get("tag") == "irrigation_main"]
+    assert len(main) == 1, [c.data for c in rig.notes]
+    alert = main[0]
+    assert alert["title"] == "Irrigation - Main water"
+    assert "still can't be confirmed off after 2 min" in alert["message"]
+    assert alert["data"]["push"]["interruption-level"] == "critical"
+    assert alert["data"]["push"]["sound"] == {"name": "default", "critical": 1, "volume": 1.0}
+    assert alert["data"]["actions"] == [{"action": "irrigation_main_close", "title": "Close main water",
+                                         "destructive": True}]
+    assert hass.states.is_state("light.main_water", "on") and calls == []  # not closed without you
+
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_main_close"})
+    await rig.settle()
+    assert hass.states.is_state("light.main_water", "off") and calls == ["turn_off"]
+    assert any("Main water closed at" in m for m in rig.messages("irrigation_main"))
+    assert hass.states.get("sensor.irrigation_status").attributes["main_water"] == "off"
+
+    broken.clear()  # the tap works again: confirmed off at the next retry
+    await rig.goto("2026-10-12 06:12", step_s=20)
+    assert hass.states.is_state("input_boolean.tap_1", "off")
+    prompt = [c.data for c in rig.notes if c.data["data"].get("tag") == "irrigation_main"][-1]
+    assert "the main water is still off" in prompt["message"]
+    assert prompt["data"]["actions"] == [{"action": "irrigation_main_open", "title": "Open main water",
+                                          "authenticationRequired": True}]
+    assert prompt["data"]["push"]["interruption-level"] == "time-sensitive"
+    assert hass.states.get("sensor.irrigation_status").state == "held"  # cycle 1 waits for the main water
+    assert not rig.periods("input_boolean.tap_2")
+    assert hass.states.is_state("light.main_water", "off")  # never opened by the app
+
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_main_open"})
+    await rig.settle()
+    await rig.goto("2026-10-12 06:16", step_s=10)
+    assert hass.states.is_state("light.main_water", "on") and calls == ["turn_off", "turn_on"]
+    assert rig.periods("input_boolean.tap_2"), rig.log  # the cycle carried on
+    assert rig.max_open == 1 and rig.app_max_open == 1
+
+
+async def test_main_water_services(hass: HomeAssistant, rig: Rig) -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    calls = await _main_light(hass)
+    await rig.setup_entry(make_options(rig.phone_id))
+    with pytest.raises(ServiceValidationError, match="No main water valve"):
+        await hass.services.async_call(DOMAIN, "close_main_water", {}, blocking=True)
+    o = make_options(rig.phone_id, main={"valve": "light.main_water"})
+    hass.config_entries.async_update_entry(rig.entry, options=normalize(o))
+    await rig.settle()
+    await hass.services.async_call(DOMAIN, "close_main_water", {}, blocking=True)
+    await rig.settle()
+    assert hass.states.is_state("light.main_water", "off")
+    assert hass.states.get("sensor.irrigation_status").attributes["main_water"] == "off"
+    await hass.services.async_call(DOMAIN, "close_main_water", {}, blocking=True)
+    await rig.settle()
+    assert any("already off" in m for m in rig.messages("irrigation_main"))
+    await hass.services.async_call(DOMAIN, "open_main_water", {}, blocking=True)
+    await rig.settle()
+    assert hass.states.is_state("light.main_water", "on") and calls == ["turn_off", "turn_on"]
 
 
 async def test_bypass_holds_cycle(hass: HomeAssistant, rig: Rig) -> None:

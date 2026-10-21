@@ -870,3 +870,135 @@ def test_long_random_soak_with_invariant():
     w.run_until("2026-10-13 05:00")
     assert_never_two(w)
     assert w.state.mode == E.IDLE and not w.state.pending, w.dump()
+
+
+# --------------------------------------------------------------------------
+# Main water valve: tap-won't-close alert, close / open, hold cycles
+# --------------------------------------------------------------------------
+MAIN = {"valve": "light.main_water", "wait_min": 10}
+
+
+def kinds(w: World, prefix: str = "main") -> list[tuple[str, str, str]]:
+    return [(hms(t), k, txt) for t, k, _n, txt in w.msgs if k.startswith(prefix)]
+
+
+def test_stuck_tap_asks_to_close_main_then_open_is_your_call():
+    o = cyc(opts(2, 1, main=MAIN), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+
+    def fix(w):
+        w.valves[0].responds_off = True
+        return set()
+
+    w.at(f"{DAY} 06:15", w.request({"type": "close_main"}))  # "Close main water" pressed
+    w.at(f"{DAY} 06:18", fix)
+    w.at(f"{DAY} 06:30", w.request({"type": "open_main"}))  # "Open main water" pressed
+    w.run_until(f"{DAY} 06:45")
+    assert_never_two(w)
+    m = kinds(w)
+    alerts = [x for x in m if x[1] == "main_alert"]
+    assert len(alerts) == 1 and alerts[0][0] == "06:11:00", m  # stuck at 06:01, asked 10 min later
+    assert "Tap 1 still can't be confirmed off after 10 min" in alerts[0][2]
+    assert not [x for x in m if x[1] == "main_auto"]  # never closed by itself
+    assert ("06:15:00", "main", ) == tuple(x[:2] for x in m if "Main water closed" in x[2])[0]
+    prompt = [x for x in m if x[1] == "main_open"]
+    assert len(prompt) == 1 and prompt[0][0] == "06:21:00", m  # retried at 06:21: now off -> asked to open
+    assert ("MAIN off" in [ev for _t, ev in w.log]) and w.main.state == "on"
+    assert [hms(t) for t, ev in w.log if ev.startswith("MAIN")] == ["06:15:00", "06:30:00"], w.dump()
+    t2 = w.on_periods(1)
+    assert t2 and t2[0][0] >= ts(f"{DAY} 06:30"), w.dump()  # the cycle waited for the main water
+    cyc_txt = w.texts("cycle")
+    assert any("Cycle 1 paused at 06:15: the main water is off" in t for t in cyc_txt), cyc_txt
+    assert any("Main water on at 06:30: cycle 1 carries on" in t for t in cyc_txt), cyc_txt
+    assert any("Tap 1 is now confirmed off. Cycle 1 waits for the main water." in t for t in w.texts("tap"))
+    assert w.state.mode == E.IDLE and not w.state.stuck_since and not w.state.main_prompt
+
+
+def test_stuck_tap_closes_main_automatically_when_set():
+    o = cyc(opts(2, 1, main={**MAIN, "auto_close": True, "wait_min": 5}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+    w.run_until(f"{DAY} 06:20")
+    m = kinds(w)
+    assert [hms(t) for t, ev in w.log if ev == "MAIN off"] == ["06:06:00"], w.dump()
+    assert not [x for x in m if x[1] == "main_alert"]
+    auto = [x for x in m if x[1] == "main_auto"]
+    assert len(auto) == 1 and "after 5 min, so the main water is being closed (automatic)" in auto[0][2]
+    assert any("Main water closed at 06:06." in x[2] for x in m)
+    assert w.main.state == "off" and w.state.mode == E.STUCK  # still retrying the tap; main stays closed
+    assert w.on_periods(1) == []  # nothing else opened
+
+
+def test_main_closed_by_hand_answers_the_alert():
+    o = cyc(opts(2, 1, main=MAIN), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+
+    def fix(w):
+        w.valves[0].responds_off = True
+        return set()
+
+    w.at(f"{DAY} 06:13", w.main_to("off"))
+    w.at(f"{DAY} 06:14", fix)
+    w.run_until(f"{DAY} 06:30")
+    m = kinds(w)
+    assert any(x[0] == "06:13:00" and x[1] == "main" and "The main water is off (06:13)" in x[2] for x in m), m
+    assert not w.state.main_ask
+    assert any(x[1] == "main_open" for x in m)  # tap fixed at the 06:16 retry: asked to open it again
+    assert w.main.state == "off" and w.on_periods(1) == []  # never opened by the app
+
+
+def test_main_water_off_holds_cycles_and_they_run_late():
+    o = cyc(opts(2, 1, main=MAIN), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:00")
+    w.at(f"{DAY} 05:55", w.main_to("off"))
+    w.at(f"{DAY} 06:40", w.main_to("on"))
+    w.run_until(f"{DAY} 06:20")
+    assert E.status(w.state, w.cfg, w.snapshot(set())) == "held"
+    w.run_until(f"{DAY} 07:00")
+    assert w.order() == ["T1", "T2"] and w.on_periods(0)[0][0] == ts(f"{DAY} 06:40"), w.dump()
+    txt = w.texts("cycle")
+    assert any("Cycle 1 is waiting: the main water is off" in t for t in txt), txt
+    assert any("Main water on at 06:40: cycle 1 carries on" in t for t in txt), txt
+    assert any("Running late: Cycle 1 started at 06:40, 40 min late" in t for t in txt), txt
+
+
+def test_main_water_off_mid_cycle_pauses_the_tap_and_keeps_its_time():
+    o = cyc(opts(2, 1, main=MAIN), 0, "06:00", [2, 2])
+    w = world(o, f"{DAY} 05:50")
+    w.at(f"{DAY} 06:00:30", w.main_to("off"))
+    w.at(f"{DAY} 06:10", w.main_to("on"))
+    w.run_until(f"{DAY} 06:30")
+    assert_never_two(w)
+    assert w.on_periods(0)[0] == (ts(f"{DAY} 06:00"), ts(f"{DAY} 06:00:30")), w.dump()
+    assert w.on_periods(0)[1][0] == ts(f"{DAY} 06:10")
+    assert abs(w.watered(0) - 120) <= 1 and abs(w.watered(1) - 120) <= 1
+    assert any("Cycle 1 paused at 06:00: the main water is off" in t for t in w.texts("cycle"))
+
+
+def test_without_a_main_valve_nothing_changes():
+    o = cyc(opts(2, 1), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+    w.run_until(f"{DAY} 06:40")
+    assert not kinds(w)
+    assert any(t.endswith("Nothing else will open; retrying every 5 min.") for t in w.texts("tap")), w.texts("tap")
+
+
+def test_main_requests_when_already_there_and_stuck_message_mentions_the_plan():
+    o = cyc(opts(2, 1, main=MAIN), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.valves[0].responds_off = False
+    w.at(f"{DAY} 05:55", w.request({"type": "open_main"}))
+    w.run_until(f"{DAY} 06:03")
+    assert any("The main water is already on." in x[2] for x in kinds(w)), kinds(w)
+    assert any("you'll be asked to close the main water" in t for t in w.texts("tap")), w.texts("tap")
+
+
+def test_old_saved_state_without_main_fields_loads():
+    d = E.State().to_dict()
+    for k in ("stuck_since", "main_alerted", "main_ask", "main_prompt", "main_note"):
+        d.pop(k)
+    st, ok = E.State.from_dict(d)
+    assert ok and st.stuck_since == 0.0 and st.main_ask is False

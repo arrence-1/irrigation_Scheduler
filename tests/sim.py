@@ -63,6 +63,7 @@ class World:
     max_open: int = 0
     down: bool = False  # Home Assistant is "down": nothing runs
     events: list[tuple[float, callable]] = field(default_factory=list)
+    main: Valve | None = None  # the main water valve (made "on" when the options set one)
 
     def __post_init__(self) -> None:
         self.options = normalize(self.options)
@@ -75,6 +76,8 @@ class World:
         self.bypass = self.bypass or [False] * T
         self.soil = self.soil or [None] * T
         self.soil_bad = self.soil_bad or [False] * T
+        if self.main is None and self.cfg.main_valve:
+            self.main = Valve(state="on")
         self.state.master = True
 
     # ------------------------------------------------------------------
@@ -98,6 +101,8 @@ class World:
             rain_state=self.rain_state, rain_value=self.rain_value, weather_state=self.weather_state,
             forecast=self.forecast, wind=self.wind, temp=self.temp, reasons=set(reasons),
             requests=list(requests or []),
+            main=(E.V_NONE if not self.cfg.main_valve or self.main is None
+                  else {"on": E.V_ON, "off": E.V_OFF}.get(self.main.state, E.V_OFFLINE)),
         )
 
     def _set_valve(self, i: int, st: str) -> bool:
@@ -152,6 +157,15 @@ class World:
                 if v.state != "offline":
                     self._set_valve(i, "off")
                 msgs += E.on_open_failed(self.state, self.cfg, i, self.now, TZ)
+        if plan.main and self.cfg.main_valve and self.main is not None:
+            want = "off" if plan.main == "close" else "on"
+            responds = self.main.responds_off if want == "off" else self.main.responds_on
+            ok = responds and self.main.state != "offline"
+            if ok and self.main.state != want:
+                self.main.state, self.main.changed = want, self.now
+                self.log.append((self.now, f"MAIN {want}"))
+                changed = True
+            msgs += E.on_main_done(self.state, self.cfg, plan.main, ok, self.now, TZ)
         for k, n, t in msgs:
             self.msgs.append((self.now, k, n, t))
         for c in plan.clear:
@@ -209,6 +223,21 @@ class World:
             return {"valve"}
         return fn
 
+    def request(self, req: dict):
+        """A service call / notification button: one pass with the request."""
+        def fn(w: World):
+            w.reconcile({"service"}, [req])
+            return set()
+        return fn
+
+    def main_to(self, state: str):
+        """The main water valve changes by hand (on / off / offline)."""
+        def fn(w: World):
+            w.main.state, w.main.changed = state, w.now
+            w.log.append((w.now, f"MAIN {state}"))
+            return {"main"}
+        return fn
+
     def restart(self, down_for_s: float = 0):
         """HA stops now and starts down_for_s later (valves keep their state)."""
         def stop(w: World):
@@ -241,7 +270,7 @@ class World:
         return sum(b - a for a, b in self.on_periods(i) if b != float("inf"))
 
     def order(self) -> list[str]:
-        return [ev.split()[0] for _t, ev in self.log if ev.endswith(" on")]
+        return [ev.split()[0] for _t, ev in self.log if ev.endswith(" on") and ev.startswith("T")]
 
     def texts(self, kind: str | None = None) -> list[str]:
         return [t for _ts, k, _n, t in self.msgs if kind is None or k == kind]

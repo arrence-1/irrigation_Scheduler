@@ -35,6 +35,8 @@ from .model import DAYS, MAX_CYCLES, MAX_MINUTES, MAX_TAPS, default_options, nor
 
 DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 VALVE_DOMAINS = ["switch", "valve", "input_boolean"]
+# a main water shut-off is often a plain relay, which some integrations (e.g. ZHA) show as a light
+MAIN_DOMAINS = ["switch", "valve", "input_boolean", "light"]
 
 
 def _num(lo: float, hi: float, step: float = 1, unit: str | None = None, slider: bool = False) -> NumberSelector:
@@ -128,7 +130,8 @@ class IrrigationOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["cycle_pick", "tap_pick", "general", "notifications", "soak", "people", "weather", "counts"],
+            menu_options=["cycle_pick", "tap_pick", "general", "notifications", "soak", "people", "weather", "main",
+                          "counts"],
         )
 
     # ---------------- cycles ----------------
@@ -338,6 +341,21 @@ class IrrigationOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="weather", data_schema=self.add_suggested_values_to_schema(
             schema, {k: v for k, v in o["weather"].items() if v != ""}))
+
+    async def async_step_main(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        o = self._opts
+        if user_input is not None:
+            o["main"].update(_clean(user_input, ["valve"]))
+            return self._save(o)
+        schema = vol.Schema(
+            {
+                vol.Optional("valve"): _entity(MAIN_DOMAINS),
+                vol.Required("wait_min"): _num(1, 240, 1, "min"),
+                vol.Required("auto_close"): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(step_id="main", data_schema=self.add_suggested_values_to_schema(
+            schema, {k: v for k, v in o["main"].items() if v != ""}))
 
     async def async_step_counts(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         o = self._opts

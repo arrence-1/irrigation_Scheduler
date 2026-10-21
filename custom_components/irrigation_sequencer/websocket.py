@@ -19,6 +19,7 @@ from .const import DOMAIN
 from .model import (
     DAYS,
     DEFAULT_GENERAL,
+    DEFAULT_MAIN,
     DEFAULT_NOTIFY,
     DEFAULT_PEOPLE,
     DEFAULT_SOAK,
@@ -53,6 +54,7 @@ def describe(hass: HomeAssistant, entry) -> dict[str, Any]:
         # settings version: the card compares it with the status sensor's config_rev to spot edits made elsewhere
         "config_rev": getattr(getattr(entry, "runtime_data", None), "config_rev", 0),
         "max_run_min": o["general"]["max_run_min"],
+        "main_valve": o["main"]["valve"],  # the main water valve (empty = not set)
         "taps": [
             {"n": i + 1, "label": f"Tap {i + 1} ({t['name']})" if t["name"] else f"Tap {i + 1}",
              "name": t["name"], "valve": t["valve"],
@@ -79,6 +81,7 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "soak": tuple(DEFAULT_SOAK),
     "people": tuple(DEFAULT_PEOPLE),
     "weather": tuple(DEFAULT_WEATHER),
+    "main": tuple(DEFAULT_MAIN),
     "tap": tuple(DEFAULT_TAP),
     "counts": ("tap_count", "cycle_count"),
 }

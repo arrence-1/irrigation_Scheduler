@@ -80,6 +80,12 @@ class State:
     hot_alerted: bool = False
     rain_seen: bool = False
     rain_dry_since: float = 0.0
+    # main water (supply valve)
+    stuck_since: float = 0.0  # when the current stuck episode began (0 = not stuck)
+    main_alerted: bool = False  # the "tap won't close" main-water alert went out for this episode
+    main_ask: bool = False  # the "Close main water?" alert is showing
+    main_prompt: bool = False  # the "Open main water?" prompt is showing
+    main_note: bool = False  # "held: main water off" was announced
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,6 +114,9 @@ class State:
                 for p in st.pending
             ]
             st.seasonal = float(st.seasonal)
+            st.stuck_since = float(st.stuck_since)
+            for k in ("main_alerted", "main_ask", "main_prompt", "main_note"):
+                setattr(st, k, bool(getattr(st, k)))
             st.reminders = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.reminders).items()}
         except (TypeError, ValueError, KeyError, IndexError):
             fresh = cls()
@@ -147,6 +156,7 @@ class Snapshot:
     temp: float | None = None  # °C
     reasons: set[str] = field(default_factory=set)
     requests: list[dict[str, Any]] = field(default_factory=list)
+    main: str = V_NONE  # main water valve: on / off / offline / none
 
 
 @dataclass
@@ -156,6 +166,7 @@ class Plan:
     msgs: list[tuple[str, int, str]] = field(default_factory=list)  # (kind, number, text)
     clear: list[str] = field(default_factory=list)  # tag suffixes, e.g. "reminder_1"
     next_wake: float | None = None
+    main: str | None = None  # "close" / "open" the main water valve
 
 
 # --------------------------------------------------------------------------
@@ -263,6 +274,11 @@ def _people_on(cfg: Cfg, sn: Snapshot, i: int) -> int:
 
 def _bypassed(sn: Snapshot, i: int) -> bool:
     return i < len(sn.bypass) and sn.bypass[i]
+
+
+def main_is_off(cfg: Cfg, sn: Snapshot | None) -> bool:
+    """The main water valve is set and reports off (offline / unknown does not count)."""
+    return bool(cfg.main_valve) and sn is not None and sn.main == V_OFF
 
 
 # --------------------------------------------------------------------------
@@ -400,6 +416,12 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
                     st.pending.insert(0, {"cycle": ci, "due": int(now // 60), "forced": True})
         elif kind == "run_tap":
             run_tap_req = req
+        elif kind in ("close_main", "open_main") and cfg.main_valve:
+            want_off = kind == "close_main"
+            if sn.main == (V_OFF if want_off else V_ON):
+                msg(("main", 0, f"The main water is already {'off' if want_off else 'on'}."))
+            else:
+                plan.main = "close" if want_off else "open"
 
     # ---------- 4. what the valves are really doing ----------
     rv = st.tap if (st.mode in (WATERING, MANUAL, STUCK) and 0 <= st.tap < T) else -1
@@ -475,14 +497,25 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
                     msg(("manual", 0, f"Manual run on {lbl(rv)} finished at {hm} (turned off)."
                          + (f" Cycle {st.cycle + 1} resumes." if st.cycle >= 0 else "")))
             elif st.mode == STUCK:
+                main_off = main_is_off(cfg, sn) or plan.main == "close"
                 msg(("tap", rv + 1, f"{lbl(rv)} is now confirmed off."
-                     + (f" Cycle {st.cycle + 1} resumes." if st.cycle >= 0 else "")))
+                     + (f" Cycle {st.cycle + 1} resumes." if st.cycle >= 0 and not main_off else "")
+                     + (f" Cycle {st.cycle + 1} waits for the main water." if st.cycle >= 0 and main_off else "")))
+                if main_off:
+                    st.main_ask, st.main_prompt = False, True
+                    msg(("main_open", 0, f"{lbl(rv)} is confirmed off, but the main water is still off. Open it again "
+                                         "when you're ready: press and hold this notification."))
+                elif st.main_ask:
+                    st.main_ask = False
+                    plan.clear.append("main")  # the "Close main water?" alert is no longer needed
+                st.stuck_since, st.main_alerted = 0.0, False
             to_gap_or_idle()
         elif now >= st.end - 1:
             # offline when it should stop: block everything, look again every 5 min
             if st.mode != STUCK:
                 msg(("tap", rv + 1, f"{lbl(rv)} is offline and was due to stop at {_hm(st.end, tz)}. "
                                     "Cannot confirm it is off, so nothing else will open. Checking every 5 min."))
+                st.stuck_since, st.main_alerted = now, False
             st.mode, st.end = STUCK, now + STUCK_RETRY_S
     elif rv >= 0 and _people_on(cfg, sn, rv) == 1 and (
         st.mode == WATERING or (st.mode == MANUAL and cfg.people_manual)
@@ -512,6 +545,56 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
     elif rv >= 0 and st.mode in (WATERING, MANUAL) and st.end - now > maxrt + 60:
         st.end = now + maxrt  # the safety limit was lowered while running
 
+    # main water: a tap that can't be confirmed off for the set time -> critical alert / close the main water
+    if st.mode == STUCK and 0 <= st.tap < T:
+        if not st.stuck_since:
+            st.stuck_since = now  # stuck since before this version
+        waited = now - st.stuck_since
+        if cfg.main_valve and not st.main_alerted and waited >= cfg.main_wait_min * 60:
+            st.main_alerted = True
+            mins = max(int(round(waited / 60)), 1)
+            what = f"{lbl(st.tap)} still can't be confirmed off after {mins} min"
+            if main_is_off(cfg, sn) or plan.main == "close":
+                msg(("main", 0, f"{what}. The main water is already off."))
+            elif cfg.main_auto_close and sn.main == V_ON:
+                plan.main = "close"
+                msg(("main_auto", 0, f"{what}, so the main water is being closed (automatic)."))
+            else:
+                st.main_ask = True
+                msg(("main_alert", 0, f"{what} and may still be running. Press and hold this notification to close "
+                                      "the main water."
+                     + (" The main water valve is offline." if sn.main == V_OFFLINE else "")))
+    elif st.stuck_since:
+        st.stuck_since, st.main_alerted = 0.0, False
+
+    # main water off: hold cycles (a running tap closes and keeps its time) until it is on again
+    main_off = main_is_off(cfg, sn) or plan.main == "close"
+    if main_off and st.mode == WATERING:
+        close(st.tap)
+        give_back(st.tap)
+        to_gap_or_idle()
+    if main_off and not st.main_note and (st.cycle >= 0 or st.pending):
+        st.main_note = True
+        ci = st.cycle if st.cycle >= 0 else st.pending[0]["cycle"]
+        msg(("cycle", ci + 1, (f"Cycle {ci + 1} paused at {hm}" if st.cycle >= 0 else f"Cycle {ci + 1} is waiting")
+             + ": the main water is off. It carries on when the main water is on again."))
+    if not main_off and sn.main == V_ON:
+        if st.main_note:
+            st.main_note = False
+            if st.cycle >= 0 or st.pending:
+                ci = st.cycle if st.cycle >= 0 else st.pending[0]["cycle"]
+                msg(("cycle", ci + 1, f"Main water on at {hm}: cycle {ci + 1} carries on."))
+        if st.main_prompt:
+            st.main_prompt = False
+            plan.clear.append("main")
+        if st.main_ask and st.mode != STUCK:
+            st.main_ask = False
+            plan.clear.append("main")
+    if main_off and st.main_ask and plan.main != "close":
+        st.main_ask = False  # closed by hand (or elsewhere): the question is answered
+        msg(("main", 0, f"The main water is off ({hm})."
+             + (f" {lbl(st.tap)} still can't be confirmed off; it is checked every 5 min." if st.mode == STUCK else "")))
+
     # bypass: hold the cycle while any tap's bypass is on (the washer gets full pressure)
     if held and st.mode == WATERING:
         close(st.tap)
@@ -533,7 +616,7 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
 
     # ---------- 5 + 6. start pending cycles, pick the next tap ----------
     for _ in range(C + 3):
-        if held:
+        if held or main_off:
             break
         if st.mode == IDLE and st.cycle < 0 and st.pending:
             _start_next_pending(st, cfg, sn, plan)
@@ -851,8 +934,10 @@ def next_wake(st: State, cfg: Cfg, sn: Snapshot, occ_next: list[float] | None = 
     cands: list[float] = []
     if st.mode in (WATERING, MANUAL, STUCK, GAP):
         cands.append(st.end)
-    if st.mode == IDLE and st.pending and not any(sn.bypass):
+    if st.mode == IDLE and st.pending and not any(sn.bypass) and not main_is_off(cfg, sn):
         cands.append(now + 1)
+    if st.mode == STUCK and cfg.main_valve and not st.main_alerted and st.stuck_since:
+        cands.append(st.stuck_since + cfg.main_wait_min * 60)
     cands += [o for o in occ_next if o > 0]
     if not st.master:
         for i, o in enumerate(occ_next):
@@ -878,9 +963,33 @@ def on_close_failed(st: State, cfg: Cfg, tap: int, now: float, tz: tzinfo) -> li
     if st.mode != STUCK or st.tap != tap:
         msgs.append(("tap", tap + 1, f"Could not confirm {cfg.label(tap)} is off."
                      + (f" Cycle {st.cycle + 1} is paused until it is." if st.cycle >= 0 else "")
-                     + " Nothing else will open; retrying every 5 min."))
+                     + " Nothing else will open; retrying every 5 min."
+                     + (f" If it is still not off after {cfg.main_wait_min} min, you'll be asked to close the main water."
+                        if cfg.main_valve and not cfg.main_auto_close else "")
+                     + (f" If it is still not off after {cfg.main_wait_min} min, the main water closes automatically."
+                        if cfg.main_valve and cfg.main_auto_close else "")))
+        st.stuck_since, st.main_alerted = now, False
     st.mode, st.tap, st.end = STUCK, tap, now + STUCK_RETRY_S  # the cycle keeps its remaining time
     return msgs
+
+
+def on_main_done(st: State, cfg: Cfg, action: str, ok: bool, now: float, tz: tzinfo) -> list[tuple[str, int, str]]:
+    """The executor closed / opened the main water valve (ok = it reports the new state)."""
+    hm = _hm(now, tz)
+    stuck = f" {cfg.label(st.tap)} still can't be confirmed off; it is checked every 5 min." if st.mode == STUCK else ""
+    if action == "close":
+        if ok:
+            st.main_ask = False
+            return [("main", 0, f"Main water closed at {hm}.{stuck} Cycles wait until it is on again.")]
+        st.main_ask = True
+        return [("main_alert", 0, f"Could not confirm the main water is off ({hm}). Check it, or try again: press and "
+                                  f"hold this notification.{stuck}")]
+    if ok:
+        st.main_prompt = False
+        return [("main", 0, f"Main water open again at {hm}."
+                 + (f" Note:{stuck}" if stuck else "") + (" Waiting cycles carry on." if st.pending or st.cycle >= 0 else ""))]
+    return [("main_open", 0, f"Could not confirm the main water is on ({hm}). Check it, or try again: press and hold "
+                             "this notification.")]
 
 
 def on_open_failed(st: State, cfg: Cfg, tap: int, now: float, tz: tzinfo) -> list[tuple[str, int, str]]:
@@ -913,7 +1022,7 @@ def status(st: State, cfg: Cfg, sn: Snapshot | None) -> str:
         return "manual"
     if st.mode == WATERING:
         return "watering"
-    held = bool(sn and any(sn.bypass))
+    held = bool(sn and (any(sn.bypass) or main_is_off(cfg, sn)))
     if st.mode == GAP and st.cycle >= 0:
         if held:
             return "held"

@@ -165,7 +165,7 @@ class IrrigationCoordinator:
         ids: set[str] = set()
         for t in cfg.taps:
             ids.update(x for x in [t.valve, t.bypass, *t.people] if x)
-        ids.update(x for x in [cfg.rain_sensor, cfg.temp_sensor] if x)
+        ids.update(x for x in [cfg.rain_sensor, cfg.temp_sensor, cfg.main_valve] if x)
         if not cfg.temp_sensor and cfg.weather_entity:
             ids.add(cfg.weather_entity)
         if ids:
@@ -188,8 +188,14 @@ class IrrigationCoordinator:
 
     @callback
     def _on_action(self, event: Event) -> None:
-        if event.data.get("action") == f"{self.cfg.n_prefix}_master_on":
+        action = event.data.get("action")
+        prefix = self.cfg.n_prefix
+        if action == f"{prefix}_master_on":
             self.hass.async_create_task(self.async_set_master(True))
+        elif action == f"{prefix}_main_close":
+            self.request("action", {"type": "close_main"})
+        elif action == f"{prefix}_main_open":
+            self.request("action", {"type": "open_main"})
 
     # ------------------------------------------------------------------
     # Requests from entities, services, the card
@@ -342,6 +348,10 @@ class IrrigationCoordinator:
             msgs += E.on_close_failed(self.state, self.cfg, failed[0], time.time(), tz)
         elif plan.close:
             E.after_close_confirmed(self.state, self.cfg, time.time())
+        if plan.main and self.cfg.main_valve:
+            main = self.cfg.main_valve
+            ok = await (self._close_confirm(main) if plan.main == "close" else self._open_confirm(main))
+            msgs += E.on_main_done(self.state, self.cfg, plan.main, ok, time.time(), tz)
         if plan.open is not None and not failed:
             valve = self.cfg.taps[plan.open].valve
             if not await self._open_confirm(valve):
@@ -544,6 +554,11 @@ class IrrigationCoordinator:
                 soil_bad.append(False)
 
         seasonal_ext = self._num(cfg.seasonal_entity) if cfg.seasonal_entity else None
+        main = E.V_NONE
+        if cfg.main_valve:
+            ms = self._state(cfg.main_valve)
+            main = (E.V_ON if ms is not None and ms.state in ON_STATES
+                    else E.V_OFF if ms is not None and ms.state in OFF_STATES else E.V_OFFLINE)
         rain = self._state(cfg.rain_sensor)
         weather = self._state(cfg.weather_entity)
         return E.Snapshot(
@@ -554,6 +569,7 @@ class IrrigationCoordinator:
             rain_state=rain.state if rain else None, rain_value=_float(rain.state) if rain else None,
             weather_state=weather.state if weather else None, forecast=forecast,
             wind=self._wind_kmh(), temp=self._temp_c(), reasons=set(reasons), requests=list(requests),
+            main=main,
         )
 
     async def _maybe_forecast(self, now: float, tz) -> dict[str, Any] | None:
@@ -661,6 +677,8 @@ class IrrigationCoordinator:
                 {"cycle": p["cycle"] + 1, "due": iso(p["due"] * 60), "run_now": p["forced"]} for p in st.pending
             ],
             "master": st.master,
+            # main water valve: on / off / offline, None when not set
+            "main_water": (self.snapshot.main if self.snapshot and cfg.main_valve else None),
             "seasonal": st.seasonal,
             "config_rev": self.config_rev,
             "last_message": self.messages[-1]["message"] if self.messages else None,

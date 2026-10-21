@@ -31,6 +31,8 @@
     "run_cycle": { "service": "mdi:play-circle" },
     "stop": { "service": "mdi:stop-circle" },
     "skip_tap": { "service": "mdi:skip-next" },
-    "run_tap": { "service": "mdi:hand-water" }
+    "run_tap": { "service": "mdi:hand-water" },
+    "close_main_water": { "service": "mdi:water-off" },
+    "open_main_water": { "service": "mdi:water-pump" }
   }
 }

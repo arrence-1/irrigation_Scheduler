@@ -1,13 +1,30 @@
 # Changelog
 
+## 1.4.0 (21 Oct 2026) — main water valve
+
+* **Main water** (new settings tab and Configure screen): pick the valve that supplies every tap (a switch, valve,
+  toggle helper or light: some relays show as a light). On = water flowing.
+* **A tap that won't close:** the app still retries it every 5 min and nothing else opens. Once it has been stuck
+  for the set time (default 10 min) you get a **critical alert** (sounds even on silent) with a **Close main water**
+  button: press and hold the notification. With *Close the main water automatically* on, the app closes it itself
+  and tells you.
+* **While the main water is off** (closed by the app or by hand) cycles wait, and a running tap stops and keeps its
+  time; they carry on, late, when it is on again. The status shows *Held*.
+* **The app never opens the main water by itself.** Once the stuck tap reports off you get a notification with an
+  **Open main water** button (needs the phone unlocked), and the card offers the same.
+* New actions `irrigation_sequencer.close_main_water` and `open_main_water`; the status sensor has a `main_water`
+  attribute (on / off / offline).
+* **Card:** a row with the Close / Open main water button when a tap is stuck or the main water is off (tap twice:
+  the first tap arms it for 5 s). The status pill says *Held* for both the bypass and the main water.
+* The card's address carries a fingerprint of the card file as well as the version (`?v=1.4.0-…`), so a changed card
+  always loads fresh after a restart, also while testing a build that keeps its version number.
+* Tests: 9 new engine scenarios, 2 new Home Assistant tests, and card checks without a browser (jsdom) in CI.
+
 ## 1.3.3 (13 Oct 2026) — renamed Irrigation Scheduler
 
 * **Called Irrigation Scheduler everywhere you see it:** Settings > Devices & services, the set-up and Configure
   screens, the device (maker and model), the card picker, the card's and the page's messages, error messages,
   the README and the notes. (HACS already showed it since 1.3.2.)
-* The card's address now carries a fingerprint of the card file as well as the version
-  (`?v=1.3.3-a2fc7506`), so a changed card always loads fresh after a restart, also while testing a build
-  that keeps the same version number.
 * **Nothing to redo:** the technical name stays `irrigation_sequencer`, so your settings, entities, dashboards
   (`custom:irrigation-sequencer-card`), automations using the actions and the Irrigation page keep working.
 

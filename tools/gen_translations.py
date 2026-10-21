@@ -66,6 +66,7 @@ opt = {
                 "soak": "Cycle-and-soak timing",
                 "people": "People guard (cameras)",
                 "weather": "Rain & weather skip",
+                "main": "Main water: shut-off valve, tap-won't-close alert",
                 "counts": "Number of taps and cycles",
             },
         },
@@ -200,6 +201,26 @@ opt = {
                              "250 % together with the seasonal %). Works even with the skip checks off.",
             },
         },
+        "main": {
+            "title": "Main water",
+            "description": "The valve that supplies water to every tap. If a tap can't be confirmed off, the app keeps "
+                           "retrying every 5 min; once it has been stuck for the wait below you get a critical alert "
+                           "with a Close main water button (press and hold the notification). While the main water "
+                           "is off, cycles wait and run late once it is on again. The app never opens the main "
+                           "water by itself: you do, with the Open main water button.",
+            "data": {
+                "valve": "Main water valve",
+                "wait_min": "Alert after a tap is stuck for",
+                "auto_close": "Close the main water automatically",
+            },
+            "data_description": {
+                "valve": "Switch, valve, toggle helper or light (some relays show as a light). On = water flowing. "
+                         "Leave empty to switch this off.",
+                "wait_min": "Counted from the moment a tap could not be confirmed off.",
+                "auto_close": "Off: you are asked (critical alert with a Close main water button). On: the app "
+                              "closes it after the wait and tells you.",
+            },
+        },
         "counts": {
             "title": "Number of taps and cycles",
             "description": "Changing these reloads the integration (the run in progress carries on).",
@@ -220,7 +241,7 @@ entity = {
                 "gap": "Between taps",
                 "soaking": "Soaking",
                 "waiting": "Waiting for people",
-                "held": "Held (bypass on)",
+                "held": "Held (bypass on or main water off)",
                 "manual": "Manual run",
                 "stuck": "Stuck (valve not off)",
             },
@@ -248,6 +269,16 @@ services = {
         "name": "Skip tap",
         "description": "Skips a tap for the rest of the running cycle.",
         "fields": {"tap": {"name": "Tap", "description": "Tap number (1 = first)."}, "config_entry_id": entry_field},
+    },
+    "close_main_water": {
+        "name": "Close main water",
+        "description": "Closes the main water valve (set under Main water). Cycles wait until it is open again.",
+        "fields": {"config_entry_id": entry_field},
+    },
+    "open_main_water": {
+        "name": "Open main water",
+        "description": "Opens the main water valve again. Waiting cycles then run (late).",
+        "fields": {"config_entry_id": entry_field},
     },
     "run_tap": {
         "name": "Run tap",

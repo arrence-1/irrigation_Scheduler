@@ -5,13 +5,13 @@
  * Live status, master switch, seasonal %, run / stop buttons.
  * Served by the irrigation_sequencer integration (no build step, no dependencies).
  */
-const CARD_VERSION = "1.3.3";
+const CARD_VERSION = "1.4.0";
 const DOMAIN = "irrigation_sequencer";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_SHORT = ["M", "T", "W", "T", "F", "S", "S"];
 const STATUS_TEXT = {
   idle: "Idle", watering: "Watering", gap: "Between taps", soaking: "Soaking",
-  waiting: "Waiting for people", held: "Held (bypass on)", manual: "Manual run", stuck: "Stuck",
+  waiting: "Waiting for people", held: "Held", manual: "Manual run", stuck: "Stuck",
 };
 const QUICK = [0, 1, 2, 3, 5, 10, 15, 20, 30];
 
@@ -127,7 +127,7 @@ class IrrigationSchedulerCard extends HTMLElement {
     const ids = [];
     if (this._cfg) {
       const e = this._cfg.entities;
-      ids.push(e.master, e.status, e.next_cycle, e.seasonal);
+      ids.push(e.master, e.status, e.next_cycle, e.seasonal, this._cfg.main_valve);
       this._cfg.cycles.forEach((c) => ids.push(c.switch));
       this._cfg.taps.forEach((t) => ids.push(t.valve, t.blocked_entity));
     }
@@ -286,6 +286,7 @@ class IrrigationSchedulerCard extends HTMLElement {
     }
     if (runC && master && master.state === "off") line += " · master switch off";
     const pending = (a.pending || []).map((p) => `C${p.cycle}`).join(", ");
+    const mainRow = this._mainRow(state, a);
 
     // Colours: the cycle in progress (blue) and what is about to run (amber).
     const remain = a.remaining_min || {};
@@ -384,6 +385,7 @@ class IrrigationSchedulerCard extends HTMLElement {
           ${gear}
         </div>
         <div class="line">${line}${pending ? ` · waiting: ${pending}` : ""}</div>
+        ${mainRow}
         ${a.last_message ? `<div class="last" title="Last message">${esc(a.last_message)}</div>` : ""}
         <div class="bar">
           <span class="lab">Seasonal</span>
@@ -428,6 +430,30 @@ class IrrigationSchedulerCard extends HTMLElement {
   disconnectedCallback() {
     this._tick(false);
     if (this._saveTimer) this._saveEdit(this._edit); // leaving the dashboard: save what was changed
+  }
+
+  // main water: shown when a tap is stuck (offer to close it) or while it is off (offer to open it)
+  _mainRow(state, a) {
+    const id = this._cfg.main_valve;
+    if (!id) return "";
+    const s = this._st(id);
+    const on = s && ["on", "open", "opening"].includes(s.state);
+    const off = s && ["off", "closed"].includes(s.state);
+    const stuck = state === "stuck";
+    if (!stuck && !off) return "";
+    const want = off ? "open" : "close";
+    const armed = this._mainArmed === want;
+    const label = want === "close"
+      ? (armed ? "Tap again to close" : "Close main water")
+      : (armed ? "Tap again to open" : "Open main water");
+    const text = stuck
+      ? `${esc(a.tap_name || "A tap")} can't be confirmed off.${off ? " The main water is off." : on ? "" : " Main water valve: " + esc(s ? s.state : "not found") + "."}`
+      : "The main water is off: cycles wait until it is on again.";
+    const btn = (stuck && off) || (!on && !off) ? "" // stuck with the water already off: fix the tap first
+      : `<button class="act ${want === "close" ? "stop" : ""} ${armed ? "armed" : ""}" data-act="main" data-v="${want}"
+          title="${want === "close" ? "Closes the main water valve" : "Opens the main water valve again"}">${label}</button>`;
+    return `<div class="mainrow ${stuck ? "alert" : ""}"><ha-icon icon="${off ? "mdi:water-off" : "mdi:alert"}"></ha-icon>
+      <span class="grow">${text}</span>${btn}</div>`;
   }
 
   _editor() {
@@ -569,6 +595,19 @@ class IrrigationSchedulerCard extends HTMLElement {
       case "stop":
         this._call(DOMAIN, "stop", { config_entry_id: cfg.entry_id });
         break;
+      case "main": { // two taps: the first arms the button for 5 s, the second acts
+        const want = el.dataset.v;
+        clearTimeout(this._mainTimer);
+        if (this._mainArmed !== want) {
+          this._mainArmed = want;
+          this._mainTimer = setTimeout(() => { this._mainArmed = null; this._render(); }, 5000);
+        } else {
+          this._mainArmed = null;
+          this._call(DOMAIN, want === "close" ? "close_main_water" : "open_main_water", { config_entry_id: cfg.entry_id });
+        }
+        this._render();
+        break;
+      }
       case "skip": {
         const st = this._st(cfg.entities.status);
         if (st && st.attributes.tap) this._call(DOMAIN, "skip_tap", { tap: st.attributes.tap, config_entry_id: cfg.entry_id });
@@ -658,6 +697,11 @@ const CSS = `
     .pill.has-left .st, .pill.has-left .sep { display: none; }
   }
   .line { margin: 6px 2px 2px; color: var(--secondary-text-color); font-size: .9em; }
+  .mainrow { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; padding: 6px 10px; border-radius: 10px;
+    font-size: .85em; background: color-mix(in srgb, var(--warning-color, #ffa600) 16%, transparent); --mdc-icon-size: 18px; }
+  .mainrow.alert { background: color-mix(in srgb, var(--error-color, #db4437) 16%, transparent); }
+  .mainrow .act { flex: none; background: var(--card-background-color, #fff); }
+  .act.armed { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: #fff; }
   .last { margin: 2px 2px 0; color: var(--secondary-text-color); font-size: .78em; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; flex-wrap: wrap; }
   .lab { font-size: .85em; color: var(--secondary-text-color); }
@@ -836,6 +880,11 @@ const GROUPS = {
     { name: "cold_on", selector: S.bool },
     { name: "cold_c", selector: S.num(-10, 15, 1, "°C") },
     { name: "boost_pct", selector: S.num(100, 200, 5, "%") },
+  ] },
+  main: { label: "Main water", group: "main", step: "main", key: "main", schema: [
+    { name: "valve", selector: S.ent(["switch", "valve", "input_boolean", "light"]) },
+    { name: "wait_min", selector: S.num(1, 240, 1, "min") },
+    { name: "auto_close", selector: S.bool },
   ] },
   counts: { label: "Taps & cycles", group: "counts", step: "counts", schema: [
     { name: "tap_count", selector: S.num(1, 16) },

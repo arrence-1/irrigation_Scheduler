@@ -56,6 +56,9 @@ DEFAULT_WEATHER = {
     "boost_pct": 100,
 }
 DEFAULT_TAP = {"valve": "", "name": "", "people": [], "soil": "", "soil_pct": 0, "bypass": ""}
+# Main water: the supply valve for every tap. A tap that can't be confirmed off for wait_min minutes raises a
+# critical alert with a "Close main water" button, or (auto_close) closes it straight away.
+DEFAULT_MAIN = {"valve": "", "wait_min": 10, "auto_close": False}
 
 
 def _int(v: Any, default: int, lo: int | None = None, hi: int | None = None) -> int:
@@ -220,6 +223,13 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
         "boost_pct": _int(w["boost_pct"], 100, 100, 200),
     }
 
+    m = {**DEFAULT_MAIN, **(raw.get("main") or {})}
+    out["main"] = {
+        "valve": _str(m["valve"]),
+        "wait_min": _int(m["wait_min"], 10, 1, 240),
+        "auto_close": bool(m["auto_close"]),
+    }
+
     taps_in = raw.get("taps") or []
     taps = []
     for i in range(T):
@@ -312,6 +322,9 @@ class Cfg:
     n_reminders: bool = True
     n_rain: bool = False
     hot_c: float = 30
+    main_valve: str = ""
+    main_wait_min: int = 10
+    main_auto_close: bool = False
 
     def label(self, i: int) -> str:
         """'Tap 1 (Backyard Left)' or 'Tap 1'."""
@@ -321,7 +334,7 @@ class Cfg:
 
 def parse(options: dict[str, Any]) -> Cfg:
     o = normalize(options)
-    g, n, s, p, w = o["general"], o["notify"], o["soak"], o["people"], o["weather"]
+    g, n, s, p, w, m = o["general"], o["notify"], o["soak"], o["people"], o["weather"], o["main"]
     return Cfg(
         taps=[TapCfg(**t) for t in o["taps"]],
         cycles=[CycleCfg(**c) for c in o["cycles"]],
@@ -337,4 +350,5 @@ def parse(options: dict[str, Any]) -> Cfg:
         n_devices=n["devices"], n_prefix=n["prefix"], n_start_finish=n["start_finish"],
         n_skips=n["skips"], n_manual=n["manual"], n_people=n["people"],
         n_reminders=n["reminders"], n_rain=n["rain"], hot_c=n["hot_c"],
+        main_valve=m["valve"], main_wait_min=m["wait_min"], main_auto_close=m["auto_close"],
     )

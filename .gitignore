@@ -7,3 +7,6 @@ __pycache__/
 *.zip
 notes.md
 .DS_Store
+node_modules/
+package-lock.json
+package.json

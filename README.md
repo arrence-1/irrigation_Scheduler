@@ -81,13 +81,14 @@ disabling the integration.
 | `switch.irrigation_master` | Off = no scheduled cycles (manual runs still work, and still get their timer) |
 | `switch.irrigation_cycle_N` | Each cycle's own on/off (attributes: start time, days, minutes per tap, next start) |
 | `number.irrigation_seasonal_adjustment` | 0-200 % slider on every scheduled duration (0 % = cycles skipped) |
-| `sensor.irrigation_status` | idle / watering / gap / soaking / waiting (people) / held (bypass) / manual / stuck; attributes: cycle, tap, ends at, remaining per tap, waiting cycles, last message |
+| `sensor.irrigation_status` | idle / watering / gap / soaking / waiting (people) / held (bypass or main water off) / manual / stuck; attributes: cycle, tap, ends at, remaining per tap, waiting cycles, main water (on / off / offline), last message |
 | `sensor.irrigation_next_cycle` | Next scheduled start (timestamp); attributes: cycle, master, reason (why there is none) |
 | `binary_sensor.irrigation_tap_N_blocked` | People guard is holding this tap back |
 
 ### Actions (services)
 `irrigation_sequencer.run_cycle` (cycle) · `irrigation_sequencer.stop` · `irrigation_sequencer.skip_tap` (tap) ·
-`irrigation_sequencer.run_tap` (tap, minutes). *Run cycle* ignores the master / cycle switches and the weather
+`irrigation_sequencer.run_tap` (tap, minutes) · `irrigation_sequencer.close_main_water` ·
+`irrigation_sequencer.open_main_water`. *Run cycle* ignores the master / cycle switches and the weather
 and soil checks (it is an explicit "run it now").
 
 ### The dashboard card
@@ -119,7 +120,7 @@ Live status, master switch, seasonal % (−/+), *Skip tap* and *Stop*. Editing n
 
 ### The Irrigation page (sidebar)
 **Irrigation** in the sidebar (admins): the grid on top and every setting below in tabs — Taps, General,
-Notifications, Cycle-and-soak, People guard, Rain & weather, Number of taps & cycles. Same labels, help and
+Notifications, Cycle-and-soak, People guard, Rain & weather, Main water, Number of taps & cycles. Same labels, help and
 limits as the Configure screens. Changes save by themselves: a switch or a picker at once, a box you type in when
 you pause or leave it ("All changes saved" at the bottom). Only *Taps & cycles* has a Save button, because a new
 number of taps or cycles reloads the app. With more
@@ -161,6 +162,12 @@ Good sensors to use:
   won't confirm off → *stuck*: nothing else opens (manual runs are closed again), retried every 5 min,
   time-sensitive alert, and the cycle resumes once it reports off. A valve that won't report on is skipped. If
   another valve is offline when the next tap should open, the cycle stops (it can't be confirmed off).
+* **Main water** (optional, *Main water* tab). Pick the valve that supplies every tap (switch, valve, toggle helper
+  or light; on = water flowing). A tap stuck for the set time (default 10 min) raises a **critical** alert with a
+  **Close main water** button (press and hold the notification); with *Close the main water automatically* on, the
+  app closes it itself and tells you. While the main water is off, cycles wait (a running tap stops and keeps its
+  time) and run, late, once it is on again. The app **never opens** the main water by itself: when the tap reports
+  off you get an **Open main water** button (phone unlocked), also on the card.
 * **Smart checks** at each cycle start: seasonal %, hot-day boost (≤ 250 % total), rain sensor / weather /
   forecast chance / forecast mm / wind / cold skips (one switch for all), soil per tap, people guard per tap.
 * **Bypass (pressure washer).** While a tap's bypass switch is on, that tap is left alone (no timer) and cycles
@@ -184,12 +191,14 @@ tag so a newer message replaces the older one; messages with the same tag in one
 | Too hot (button if master is off) | Too hot at | `irrigation_hot` |
 | Started raining | Started raining | `irrigation_rain` |
 | Tap fault (time-sensitive on iOS) | always | `irrigation_tap_N` |
+| Tap won't close: close the main water? (**critical**, with **Close main water** button) / closed / open again (with **Open main water** button) | always (needs a main water valve) | `irrigation_main` |
 | Recovered after restart / reload | always | `irrigation_recovery` |
 | Settings warnings | always | `irrigation_config` |
 
 Every message is also fired as the event `irrigation_sequencer_message` (for your own automations), and the
 last one is on `sensor.irrigation_status` (`last_message`). iOS time-sensitive needs the Companion app's
-*Time Sensitive* permission.
+*Time Sensitive* permission, critical alerts its *Critical Alerts* permission (iOS Settings > Notifications >
+Home Assistant).
 
 ---
 
