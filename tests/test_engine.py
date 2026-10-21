@@ -1229,8 +1229,7 @@ def test_battery_warning_repeats_every_2_h_but_not_in_the_quiet_time():
     w.run_until("2026-10-13 08:30")
     assert bat_times(w) == ["18:00:00", "20:00:00", "06:00:00", "08:00:00"], kinds(w, "battery")
     first = w.texts("battery")[0]
-    assert first == ("Low battery (warning at 30%): Tap 2 25%. Replace the batteries soon: an offline valve makes the "
-                     "cycles wait. Repeats every 2 h (not 21:00-06:00); press and hold to snooze.")
+    assert first == "Tap 2 25%\n\nReplace the batteries soon. Press and hold to snooze."
 
 
 def test_battery_snooze_new_low_tap_breaks_through_fine_again_stops_it():
@@ -1246,7 +1245,7 @@ def test_battery_snooze_new_low_tap_breaks_through_fine_again_stops_it():
     notes = w.texts("battery_note")
     assert notes == ["Battery warnings snoozed for 1 day, until Tue 13 Oct 12:30. Still low: Tap 2.",
                      "Battery fine again: Tap 1 100%.", "Battery fine again: Tap 2 99%."], notes
-    assert "Tap 1 20%; Tap 2 25%" in w.texts("battery")[1]
+    assert w.texts("battery")[1].startswith("Tap 1 20%\nTap 2 25%\n\n")  # lowest first
     assert w.state.bat_low == [False, False, False] and w.state.bat_snooze_until == 0.0
 
 
@@ -1255,7 +1254,7 @@ def test_battery_warning_once_when_repeat_is_0_and_off_at_0_pct():
     w = world(o, f"{DAY} 08:00")
     w.at(f"{DAY} 08:01", w.battery_to([10.0, None]))
     w.run_until(f"{DAY} 14:00")
-    assert bat_times(w) == ["08:01:00"] and "Repeats" not in w.texts("battery")[0]
+    assert bat_times(w) == ["08:01:00"]
     w.set_options(opts(2, 1, battery={"report_on": False, "pct": 0}))
     w.run_until(f"{DAY} 14:02")
     assert (ts(f"{DAY} 14:00"), "battery") in w.clears or any(c == "battery" for _t, c in w.clears)
@@ -1308,7 +1307,7 @@ def test_offline_question_shows_the_last_battery_level():
     assert ("Tap 1 has been offline since 05:52 (last seen closed; battery 12% then)" in w.texts("offline")[0])
     # low at 05:51, inside the quiet time (21:00-06:00): the warning waits until 06:00
     assert bat_times(w) == ["06:00:00"]
-    assert w.texts("battery")[0].startswith("Low battery (warning at 30%): Tap 1 12% (offline). ")
+    assert w.texts("battery")[0].startswith("Tap 1 12% (offline)\n\n")
     assert w.state.bat_level[0] == 12.0  # kept while its sensor is unavailable
 
 

@@ -1288,12 +1288,10 @@ def _battery(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
         return
     st.bat_last, st.bat_shown = list(low), True
     st.bat_next = now + cfg.bat_remind_h * 3600 if cfg.bat_remind_h > 0 else 0.0
-    parts = [f"{lbl(t)} {_g(round(st.bat_level[t]))}%" + (" (offline)" if _offline(sn, t) else "") for t in low]
-    msg(("battery", 0, f"Low battery (warning at {pct}%): {'; '.join(parts)}. Replace the batteries soon: an offline "
-                       "valve makes the cycles wait."
-         + (f" Repeats every {_g(cfg.bat_remind_h)} h" + (f" (not {cfg.quiet_from}-{cfg.quiet_to})" if cfg.quiet_on
-                                                           and cfg.quiet_from != cfg.quiet_to else "")
-            + "; press and hold to snooze." if cfg.bat_remind_h > 0 else "")))
+    # short: one valve per line, lowest first (the title already says "Low battery")
+    lines = [f"{lbl(t)} {_g(round(st.bat_level[t]))}%" + (" (offline)" if _offline(sn, t) else "")
+             for t in sorted(low, key=lambda t: (st.bat_level[t], t))]
+    msg(("battery", 0, "\n".join(lines) + "\n\nReplace the batteries soon. Press and hold to snooze."))
 
 
 def _snooze_battery(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, hours: float) -> None:

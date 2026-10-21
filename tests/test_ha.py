@@ -766,7 +766,7 @@ async def test_low_battery_warning_snooze_and_report(hass: HomeAssistant, rig: R
     await rig.goto("2026-10-12 06:01", step_s=20)
     warn = _notes(rig, "irrigation_battery")
     assert len(warn) == 1 and warn[0]["title"] == "Irrigation - Low battery"
-    assert warn[0]["message"].startswith("Low battery (warning at 30%): Tap 2 (Backyard Centre) 25%.")
+    assert warn[0]["message"] == "Tap 2 (Backyard Centre) 25%\n\nReplace the batteries soon. Press and hold to snooze."
     assert warn[0]["data"]["push"]["interruption-level"] == "active"
     assert warn[0]["data"]["actions"] == [
         {"action": "irrigation_battery_snooze_24", "title": "Snooze 1 day"},

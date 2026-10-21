@@ -14,7 +14,8 @@
   held back during the **quiet time** (21:00-06:00); press and hold to **Snooze 1 day** or **Snooze…** (type 12, 2d,
   1 week). A valve that gets low later still warns. **Battery report**: every valve's level every 14 days at 10:00
   (days, time and a first date are settings), plus *Send report now*. It reads: the lowest valve first, then one
-  tap per line, then *Next report: Wed 4 Nov 10:00*. All levels, times and repeats can be changed.
+  tap per line, then *Next report: Wed 4 Nov 10:00*. The low-battery warning is short too: one valve per line,
+  lowest first. All levels, times and repeats can be changed.
 * New actions `irrigation_sequencer.skip_offline_tap`, `snooze_battery_warnings` and `send_battery_report`; status
   attributes `offline`, `offline_skipped`, `offline_waiting`, `offline_until`, `battery`, `battery_low`,
   `battery_snoozed_until`, `battery_report_next`.
