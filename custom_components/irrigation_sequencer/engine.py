@@ -1341,17 +1341,17 @@ def _battery_report(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, asked: bool) 
             plan.msgs.append(("battery_report", 0, "No battery levels to report: none of the tap valves has a "
                                                    "battery sensor (set one under the tap's settings)."))
         return
-    parts = []
-    for t in taps:
-        lvl = st.bat_level[t]
-        parts.append(f"{lbl(t)}: no battery reading" if lvl < 0 else
-                     f"{lbl(t)} {_g(round(lvl))}%" + (" (offline)" if _offline(sn, t) else "")
-                     + (" LOW" if st.bat_low[t] else ""))
+    def line(t: int) -> str:
+        if st.bat_level[t] < 0:
+            return f"{lbl(t)}: no battery reading"
+        return (f"{lbl(t)} {_g(round(st.bat_level[t]))}%" + (" (offline)" if _offline(sn, t) else "")
+                + (" (low)" if st.bat_low[t] else ""))
+
+    # the lowest first, then one tap per line in tap order, then when the next one comes
     lowest = min(known, key=lambda t: (st.bat_level[t], t))
     _last, nxt = report_times(st, cfg, now, tz)
-    plan.msgs.append(("battery_report", 0, "Battery levels: " + "; ".join(parts)
-                      + f". Lowest: {lbl(lowest)} at {_g(round(st.bat_level[lowest]))}%."
-                      + (f" Next report {_ddhm(nxt, tz)}." if nxt else "")))
+    plan.msgs.append(("battery_report", 0, f"Lowest: {line(lowest)}\n\n" + "\n".join(line(t) for t in taps)
+                      + (f"\n\nNext report: {_ddhm(nxt, tz)}" if nxt else "")))
 
 
 def _reminders(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, occ_next: list[float]) -> None:

@@ -791,8 +791,11 @@ async def test_low_battery_warning_snooze_and_report(hass: HomeAssistant, rig: R
     await rig.settle()
     rep = _notes(rig, "irrigation_battery_report")
     assert rep[-1]["title"] == "Irrigation - Battery levels"
-    assert rep[-1]["message"].startswith("Battery levels: Tap 1 (Backyard Left): no battery reading; Tap 2 "
-                                         "(Backyard Centre) 25% LOW; Tap 3 (Front Lawn): no battery reading.")
+    assert rep[-1]["message"] == ("Lowest: Tap 2 (Backyard Centre) 25% (low)\n\n"
+                                  "Tap 1 (Backyard Left): no battery reading\n"
+                                  "Tap 2 (Backyard Centre) 25% (low)\n"
+                                  "Tap 3 (Front Lawn): no battery reading\n\n"
+                                  "Next report: Mon 12 Oct 10:00")
     nxt = hass.states.get("sensor.irrigation_status").attributes["battery_report_next"]
     assert nxt.startswith("2026-10-12T10:00")  # counts from today: first report at 10:00
 

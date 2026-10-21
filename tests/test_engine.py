@@ -1267,8 +1267,8 @@ def test_battery_report_every_14_days_from_the_first_day_and_on_request():
     w = world(o, f"{DAY} 05:00")  # the report counts from today: first one at 10:00 today
     w.battery = [61.0, 50.0, None]
     w.run_until(f"{DAY} 10:01")
-    assert w.texts("battery_report") == ["Battery levels: Tap 1 61%; Tap 2 50%; Tap 3: no battery reading. Lowest: "
-                                         "Tap 2 at 50%. Next report Mon 26 Oct 10:00."]
+    assert w.texts("battery_report") == ["Lowest: Tap 2 50%\n\nTap 1 61%\nTap 2 50%\nTap 3: no battery reading"
+                                         "\n\nNext report: Mon 26 Oct 10:00"]
     assert E.report_times(w.state, w.cfg, w.now, w.snapshot(set()).tz)[1] == ts("2026-10-26 10:00")
     w.at(f"{DAY} 12:00", w.request({"type": "battery_report"}))
     w.run_until(f"{DAY} 12:01")
@@ -1284,7 +1284,7 @@ def test_battery_report_start_date_and_changes_dont_send_for_the_past():
     w.set_options(opts(2, 1, battery={"report_time": "08:00", "report_days": 7, "report_start": "2026-10-14"}))
     w.run_until("2026-10-14 08:01")
     assert [hms(t) for t, k, _n, _x in w.msgs if k == "battery_report"] == ["08:00:00"]
-    assert w.texts("battery_report")[0].endswith("Next report Wed 21 Oct 08:00.")
+    assert w.texts("battery_report")[0] == "Lowest: Tap 1 61%\n\nTap 1 61%\nTap 2 70%\n\nNext report: Wed 21 Oct 08:00"
     w.set_options(opts(2, 1, battery={"report_on": False}))
     w.run_until("2026-10-21 08:01")
     assert len(w.texts("battery_report")) == 1
@@ -1310,3 +1310,13 @@ def test_offline_question_shows_the_last_battery_level():
     assert bat_times(w) == ["06:00:00"]
     assert w.texts("battery")[0].startswith("Low battery (warning at 30%): Tap 1 12% (offline). ")
     assert w.state.bat_level[0] == 12.0  # kept while its sensor is unavailable
+
+
+def test_battery_report_layout_low_offline_and_no_next_line_when_off():
+    o = opts(3, 1, battery={"report_on": False})
+    w = world(o, f"{DAY} 12:00")
+    w.at(f"{DAY} 12:01", w.battery_to([45.0, 12.0, 80.0]))
+    w.at(f"{DAY} 12:02", w.valve_to(2, "offline"))
+    w.at(f"{DAY} 12:03", w.request({"type": "battery_report"}))
+    w.run_until(f"{DAY} 12:05")
+    assert w.texts("battery_report") == ["Lowest: Tap 2 12% (low)\n\nTap 1 45%\nTap 2 12% (low)\nTap 3 80% (offline)"]
