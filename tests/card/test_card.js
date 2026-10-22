@@ -189,6 +189,28 @@ function hass(status, attrs, main) {
   foot.querySelector('button[data-a="report"]').click(); await tick();
   if (JSON.stringify(calls[0]) !== JSON.stringify(["irrigation_sequencer", "send_battery_report", { config_entry_id: "E1" }])) fail("report call");
   if (!/Sent\./.test(set2.shadowRoot.querySelector(".foot").textContent)) fail("report sent message");
+  // skip watering: the row with "Run as scheduled", the line, the "Skip next cycle" button when idle
+  calls.length = 0;
+  const nextAt = new Date(Date.now() + 3600e3).toISOString();
+  const h3 = (attrs) => { const h = hass2("idle", attrs); h.states["sensor.n"] = { state: nextAt, attributes: { cycle: 1 }, last_updated: String(Math.random()) }; return h; };
+  c2.hass = h3({ skip_next: true, next_cycle_skipped: true }); await tick();
+  const skipRow = [...r2.querySelectorAll(".mainrow")].map((r) => r.textContent.replace(/\s+/g, " ").trim()).find((t) => /skipped/.test(t)) || "";
+  console.log("skip row:", skipRow, "| line:", r2.querySelector(".line").textContent.trim());
+  if (!/The next cycle will be skipped\.\s*Run as scheduled/.test(skipRow)) fail("skip row");
+  if (!/will be skipped/.test(r2.querySelector(".line").textContent)) fail("line says skipped");
+  if (r2.querySelector('button[data-act="skipnext"]')) fail("no Skip next button while skipping");
+  r2.querySelector('button[data-act="skipcancel"]').click(); await tick();
+  c2.hass = h3({}); await tick();
+  const sn = r2.querySelector('button[data-act="skipnext"]');
+  if (!sn || sn.textContent.trim() !== "Skip next cycle") fail("Skip next cycle button");
+  sn.click(); await tick();
+  console.log("calls:", JSON.stringify(calls));
+  if (JSON.stringify(calls) !== JSON.stringify([["irrigation_sequencer", "skip_watering", { hours: 0, config_entry_id: "E1" }],
+    ["irrigation_sequencer", "skip_next_cycle", { config_entry_id: "E1" }]])) fail("skip calls");
+  c2.hass = h3({ skip_until: "2026-10-23T17:40:00+11:00" }); await tick();
+  if (!/Watering skipped until .*17:40\./.test(r2.textContent)) fail("skipped until row");
+  set2.shadowRoot.querySelector('.tab[data-v="weather"]').click(); await tick();
+  if (!set2.shadowRoot.querySelector("ha-form").schema.some((f) => f.name === "fc_both")) fail("weather fc_both");
   console.log("CARD TESTS OK");
   process.exit(0);
 })().catch((e) => fail(e.stack));

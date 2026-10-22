@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "irrigation_sequencer"
 NAME = "Irrigation Scheduler"
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.SENSOR, Platform.BINARY_SENSOR]
 
@@ -46,3 +46,5 @@ SERVICE_SNOOZE_MAIN = "snooze_main_water_reminders"
 SERVICE_SKIP_OFFLINE = "skip_offline_tap"
 SERVICE_SNOOZE_BATTERY = "snooze_battery_warnings"
 SERVICE_BATTERY_REPORT = "send_battery_report"
+SERVICE_SKIP_NEXT = "skip_next_cycle"
+SERVICE_SKIP_WATERING = "skip_watering"

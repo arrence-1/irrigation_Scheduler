@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.6.0 (22 Oct 2026) — skip watering, forecast needs both
+
+* **Skip watering** (e.g. from a rain alert): *Skip next cycle* skips the next scheduled cycle, or stops the one
+  running / waiting (that one counts); *Skip for…* skips every scheduled cycle due in the next hours and stops the
+  running one. *Run now* cycles are never skipped. Kept across restarts. Actions `skip_next_cycle` and
+  `skip_watering` (hours, 0 = run as scheduled again); phone buttons `irrigation_skip_next`, `irrigation_skip_24` and
+  `irrigation_skip` (type hours or days) work from any notification, e.g. your own rain alert automation.
+* **Card:** *Skip next cycle* button (when idle), a row "The next cycle will be skipped / Watering skipped until …"
+  with *Run as scheduled*, and "· will be skipped" on the next-cycle line.
+* **Forecast: need both** (Rain & weather, on by default): with both forecast limits set, a cycle is skipped only
+  when the chance AND the amount are met (before, either one skipped: 70 % of 0.2 mm skipped). When only one is met
+  you get a note saying so, and the status sensor's `forecast_check` attribute shows the last check (chance,
+  amount, skipped or not, rule).
+* Status attributes `skip_next`, `skip_until`, `next_cycle_skipped`, `forecast_check`.
+
 ## 1.5.0 (21 Oct 2026) — offline valves and valve batteries
 
 * **Offline valves** (new *Offline valves* tab and Configure screen). Before, any offline valve stopped a cycle. Now

@@ -77,6 +77,12 @@
     },
     "send_battery_report": {
       "service": "mdi:battery-heart-variant"
+    },
+    "skip_next_cycle": {
+      "service": "mdi:skip-next-circle"
+    },
+    "skip_watering": {
+      "service": "mdi:calendar-remove"
     }
   }
 }

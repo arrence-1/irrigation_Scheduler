@@ -333,6 +333,7 @@ class IrrigationOptionsFlow(OptionsFlow):
                 vol.Optional("weather_entity"): _entity("weather"),
                 vol.Required("fc_prob"): _num(0, 100, 5, "%"),
                 vol.Required("fc_mm"): _num(0, 50, 0.5, "mm"),
+                vol.Required("fc_both"): BooleanSelector(),
                 vol.Optional("wind_sensor"): _entity("sensor"),
                 vol.Required("wind_kmh"): _num(0, 100, 1, "km/h"),
                 vol.Optional("temp_sensor"): _entity("sensor"),

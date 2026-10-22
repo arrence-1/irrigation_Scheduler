@@ -158,8 +158,9 @@ async def test_options_flow_every_screen(hass: HomeAssistant, rig: Rig) -> None:
         ("people", {"on": True, "clear_min": 3, "max_wait_min": 20, "manual": True},
          lambda o: o["people"]["max_wait_min"] == 20),
         ("weather", {"on": True, "rain_sensor": "sensor.rain", "rain_mm": 4, "fc_prob": 60, "fc_mm": 3,
-                     "wind_kmh": 30, "cold_on": True, "cold_c": 3, "boost_pct": 120},
-         lambda o: o["weather"]["rain_sensor"] == "sensor.rain" and o["weather"]["weather_entity"] == ""),
+                     "fc_both": False, "wind_kmh": 30, "cold_on": True, "cold_c": 3, "boost_pct": 120},
+         lambda o: o["weather"]["rain_sensor"] == "sensor.rain" and o["weather"]["weather_entity"] == ""
+         and o["weather"]["fc_both"] is False),
         ("main", {"valve": "light.main_water", "wait_min": 15, "auto_close": True, "remind_min": 60,
                   "remind_cycle": False},
          lambda o: o["main"] == {"valve": "light.main_water", "wait_min": 15, "auto_close": True, "remind_min": 60,
@@ -803,3 +804,65 @@ async def test_low_battery_warning_snooze_and_report(hass: HomeAssistant, rig: R
     await rig.settle()
     assert _notes(rig, "irrigation_battery")[-1]["message"] == "Battery fine again: Tap 2 (Backyard Centre) 100%."
     assert hass.states.get("sensor.irrigation_status").attributes["battery_low"] == []
+
+
+
+# --------------------------------------------------------------------------
+# Skip watering (rain alert buttons, actions) and the forecast check
+# --------------------------------------------------------------------------
+async def test_skip_watering_actions_buttons_and_attributes(hass: HomeAssistant, rig: Rig) -> None:
+    o = cycle(make_options(rig.phone_id), 0, "06:00", [1, 1, 0])
+    await rig.setup_entry(o)
+    await master_on(hass, rig)
+    st = lambda: hass.states.get("sensor.irrigation_status").attributes  # noqa: E731
+    assert st()["skip_next"] is False and st()["next_cycle_skipped"] is False
+    # a rain alert's "Skip next cycle" button
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_skip_next"})
+    await rig.settle()
+    assert st()["skip_next"] is True and st()["next_cycle_skipped"] is True
+    note = [c.data for c in rig.notes if c.data["data"].get("tag") == "irrigation_skip_watering"][-1]
+    assert note["title"] == "Irrigation - Skip watering"
+    assert note["message"] == "The next cycle (Cycle 1, Mon 12 Oct 06:00) will be skipped."
+    await rig.goto("2026-10-12 06:03")
+    assert not rig.order()
+    assert any("you chose to skip this cycle" in m for m in rig.messages("irrigation_cycle_1"))
+    assert st()["skip_next"] is False
+    # typed hours, a reply that isn't a number, then cancel with the action
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_skip", "reply_text": "2d"})
+    await rig.settle()
+    assert st()["skip_until"].startswith("2026-10-14T06:03")
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_skip", "reply_text": "rain"})
+    await rig.settle()
+    assert "Couldn't read \"rain\"" in rig.messages("irrigation_skip_watering")[-1]
+    await hass.services.async_call(DOMAIN, "skip_watering", {"hours": 0}, blocking=True)
+    await rig.settle()
+    assert st()["skip_until"] is None and "Skipping cancelled" in rig.messages("irrigation_skip_watering")[-1]
+    hass.bus.async_fire("mobile_app_notification_action", {"action": "irrigation_skip_24"})
+    await rig.settle()
+    assert st()["skip_until"].startswith("2026-10-13T06:03")
+    await hass.services.async_call(DOMAIN, "skip_next_cycle", {}, blocking=True)
+    await rig.settle()
+    with pytest.raises(Exception):  # noqa: B017 - schema: hours out of range
+        await hass.services.async_call(DOMAIN, "skip_watering", {"hours": 500}, blocking=True)
+
+
+async def test_forecast_check_attribute_and_note(hass: HomeAssistant, rig: Rig) -> None:
+    hass.states.async_set("weather.home", "cloudy", {"temperature": 20})
+
+    async def forecasts(call):
+        return {"weather.home": {"forecast": [{"precipitation_probability": 70, "precipitation": 1}]}}
+
+    from homeassistant.core import SupportsResponse
+
+    hass.services.async_register("weather", "get_forecasts", forecasts, supports_response=SupportsResponse.ONLY)
+    o = cycle(make_options(rig.phone_id, weather={"weather_entity": "weather.home", "fc_prob": 70, "fc_mm": 5}),
+              0, "06:00", [1, 1, 0])
+    await rig.setup_entry(o)
+    await master_on(hass, rig)
+    await rig.goto("2026-10-12 06:01")
+    fc = hass.states.get("sensor.irrigation_status").attributes["forecast_check"]
+    assert fc["chance"] == 70 and fc["amount"] == 1 and fc["result"] == "not skipped" and fc["rule"] == "both"
+    assert fc["at"].startswith("2026-10-12T06:00")
+    assert any("Forecast 70% chance of 1 mm: not skipped, both 70% and 5 mm are needed" in m
+               for m in rig.messages("irrigation_cycle_1"))
+    assert rig.order() == ["1"]

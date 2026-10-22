@@ -135,3 +135,27 @@ send_battery_report:
       selector:
         config_entry:
           integration: irrigation_sequencer
+skip_next_cycle:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer
+skip_watering:
+  fields:
+    hours:
+      required: true
+      example: 24
+      selector:
+        number:
+          min: 0
+          max: 168
+          step: 1
+          unit_of_measurement: h
+          mode: box
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: irrigation_sequencer

@@ -229,6 +229,18 @@ class IrrigationCoordinator:
                 self.request("action")
             else:
                 self.request("action", {"type": "snooze_main", "hours": hours})
+        elif action == f"{prefix}_skip_next":  # e.g. from the rain alert
+            self.request("action", {"type": "skip_watering", "next": True})
+        elif action == f"{prefix}_skip_24":
+            self.request("action", {"type": "skip_watering", "hours": 24})
+        elif action == f"{prefix}_skip":
+            hours = parse_hours(event.data.get("reply_text"))
+            if hours is None or hours <= 0:
+                self._startup_msgs.append(("skip_note", 0, f"Couldn't read \"{event.data.get('reply_text') or ''}\" "
+                                                           "as hours or days (try 12, 2d); nothing is skipped."))
+                self.request("action")
+            else:
+                self.request("action", {"type": "skip_watering", "hours": hours})
         elif action == f"{prefix}_offline_skip":
             self.request("action", {"type": "skip_offline", "tap": -1, "skip": True})
         elif action == f"{prefix}_offline_stop":
@@ -691,6 +703,13 @@ class IrrigationCoordinator:
                 best = (occ, i)
         return best
 
+    def next_cycle_skipped(self) -> bool:
+        """The next scheduled start will be skipped because you chose to skip."""
+        nxt = self.next_cycle()
+        if nxt is None:
+            return False
+        return self.state.skip_next > 0 or nxt[0] < self.state.skip_until
+
     def next_cycle_reason(self) -> str | None:
         """Why no cycle is scheduled (None when one is), in plain words for the card and the sensor."""
         if self.next_cycle() is not None:
@@ -767,6 +786,12 @@ class IrrigationCoordinator:
             "battery_low": [i + 1 for i, low in enumerate(st.bat_low) if low],
             "battery_snoozed_until": iso(st.bat_snooze_until) if st.bat_snooze_until > time.time() else None,
             "battery_report_next": iso(E.report_times(st, cfg, time.time(), tz)[1]) if cfg.rep_on else None,
+            # you chose to skip: the next cycle, or everything until a time; whether the next start is skipped
+            "skip_next": st.skip_next > 0,
+            "skip_until": iso(st.skip_until) if st.skip_until > time.time() else None,
+            "next_cycle_skipped": self.next_cycle_skipped(),
+            # the last forecast check at a cycle start (chance %, amount mm, skipped or not, rule both / either)
+            "forecast_check": ({**st.fc_last, "at": iso(st.fc_last.get("at", 0))} if st.fc_last else None),
             "config_rev": self.config_rev,
             "last_message": self.messages[-1]["message"] if self.messages else None,
         }

@@ -194,3 +194,13 @@ it (the two tests that check the address now expect it).
   22%"; tap panel battery % and *Include again*; *Tap settings* → "Hide tap settings" → hidden again; the *Offline
   valves* / *Batteries* tabs and *Send report now*. Also looked at in Chromium at phone width.
 * hassfest 2026.10.1: 0 invalid. `ruff` clean. `release_check 1.5.0` OK.
+
+## 1.6.0 (22 Oct 2026) — skip watering, forecast needs both
+* Engine: forecast both (95 %/20 mm and 70 %/5 mm skip; 70 %/1 mm and 30 %/9 mm don't, with the note naming the
+  limit that was met; 20 %/0 mm quiet), one limit set still skips alone, no forecast noted; skip next (only the next
+  one), skip 24 h (both cycles, then runs again), skip stops the running cycle (counts as the skipped one), Run now
+  still runs, cancel / nothing to cancel, skip kept across a restart. Home Assistant: phone buttons
+  (`irrigation_skip_next`, typed "2d", "rain" refused, `irrigation_skip_24`), the actions, the attributes
+  (`skip_next`, `skip_until`, `next_cycle_skipped`, `forecast_check`), the note's tag and title, the Rain & weather
+  screen's *Forecast: need both*. Card (jsdom): skip row + *Run as scheduled*, "will be skipped" on the line, *Skip
+  next cycle* button, the setting.
