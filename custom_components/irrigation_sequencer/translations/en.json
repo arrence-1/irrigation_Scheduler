@@ -387,6 +387,7 @@
           "weather_entity": "Weather entity",
           "fc_prob": "Forecast rain chance",
           "fc_mm": "Forecast rain amount",
+          "fc_both": "Forecast: need both",
           "wind_sensor": "Wind speed sensor",
           "wind_kmh": "Too windy at",
           "temp_sensor": "Outdoor temperature sensor",
@@ -398,7 +399,8 @@
           "rain_sensor": "Skip when it is 'on' or at/above the rain amount (a rain-today or 24 h total works well).",
           "weather_entity": "Skip when it is rainy / pouring now; also the forecast source, and the fallback for wind and temperature.",
           "fc_prob": "Today's forecast chance. 0 = off.",
-          "fc_mm": "Today's forecast amount. 0 = off.",
+          "fc_mm": "Today's forecast amount (BOM gives a range: its top is used, e.g. 1-5 mm counts as 5). 0 = off.",
+          "fc_both": "On: with both forecast limits set, skip only when the chance AND the amount are met (70% of 0.2 mm doesn't skip). Off: either one skips on its own. When only one is met you get a note saying so.",
           "wind_kmh": "0 = off.",
           "temp_sensor": "Used by the cold skip, the too-hot alert and the hot-day boost.",
           "boost_pct": "Durations x this when it is at/above 'Too hot at' as a cycle starts (100 = off; max 250 % together with the seasonal %). Works even with the skip checks off."
@@ -617,6 +619,30 @@
       "name": "Send battery report",
       "description": "Sends the battery report (every tap valve's battery level) now.",
       "fields": {
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Only needed when you have more than one."
+        }
+      }
+    },
+    "skip_next_cycle": {
+      "name": "Skip next cycle",
+      "description": "Skips the next scheduled cycle (or stops the running / waiting one). Run now cycles are never skipped.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Only needed when you have more than one."
+        }
+      }
+    },
+    "skip_watering": {
+      "name": "Skip watering",
+      "description": "Skips every scheduled cycle due in the next hours and stops the running one. 0 = cancel any skip (run as scheduled).",
+      "fields": {
+        "hours": {
+          "name": "Hours",
+          "description": "How long (24 = a day). 0 = run as scheduled again."
+        },
         "config_entry_id": {
           "name": "Integration entry",
           "description": "Only needed when you have more than one."

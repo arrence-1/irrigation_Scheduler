@@ -5,7 +5,7 @@
  * Live status, master switch, seasonal %, run / stop buttons.
  * Served by the irrigation_sequencer integration (no build step, no dependencies).
  */
-const CARD_VERSION = "1.5.0";
+const CARD_VERSION = "1.6.0";
 const DOMAIN = "irrigation_sequencer";
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_SHORT = ["M", "T", "W", "T", "F", "S", "S"];
@@ -284,7 +284,8 @@ class IrrigationSchedulerCard extends HTMLElement {
       line = `Cycle ${runC}` + (a.next_step ? ` · next step ${hhmm(a.next_step)}` : "");
     } else if (next && next.state && next.state !== "unknown" && next.state !== "unavailable") {
       line = `Next: Cycle ${next.attributes.cycle} · ${dayWord(next.state)} ${hhmm(next.state)} · ${inText(next.state)}`;
-      if (master && master.state === "off") line += " · master switch off, so it won't run";
+      if (a.next_cycle_skipped) line += " · will be skipped";
+      else if (master && master.state === "off") line += " · master switch off, so it won't run";
     } else {
       const why = next && next.attributes.reason;
       line = `No cycle scheduled${why ? `: ${esc(why.charAt(0).toLowerCase() + why.slice(1))}` : ""}`;
@@ -292,7 +293,7 @@ class IrrigationSchedulerCard extends HTMLElement {
     }
     if (runC && master && master.state === "off") line += " · master switch off";
     const pending = (a.pending || []).map((p) => `C${p.cycle}`).join(", ");
-    const mainRow = this._mainRow(state, a) + this._offlineRow(state, a) + this._batteryRow(a);
+    const mainRow = this._mainRow(state, a) + this._skipRow(a) + this._offlineRow(state, a) + this._batteryRow(a);
 
     // Colours: the cycle in progress (blue) and what is about to run (amber).
     const remain = a.remaining_min || {};
@@ -403,7 +404,9 @@ class IrrigationSchedulerCard extends HTMLElement {
           <button class="ico" data-act="seas" data-d="5" ${sv === null ? "disabled" : ""}>+</button>
           <span class="grow"></span>
           ${state !== "idle" || pending ? `<button class="act" data-act="skip" ${runT && state === "watering" ? "" : "disabled"}>Skip tap</button>
-          <button class="act stop" data-act="stop">Stop</button>` : ""}
+          <button class="act stop" data-act="stop">Stop</button>`
+            : edit && !a.skip_next && !a.skip_until && next && !["unknown", "unavailable"].includes(next.state)
+              ? `<button class="act" data-act="skipnext" title="Skip the next scheduled cycle (e.g. after rain)">Skip next cycle</button>` : ""}
         </div>
         <div class="wrap"><table>
           <thead><tr><th class="corner" rowspan="2">Tap</th>${head}</tr><tr>${switches}</tr></thead>
@@ -493,6 +496,15 @@ class IrrigationSchedulerCard extends HTMLElement {
       : can.length < off.length ? `<span class="hint">Last seen open: can't be skipped.</span>` : "";
     return `<div class="mainrow ${waiting.length ? "alert" : ""}"><ha-icon icon="mdi:lan-disconnect"></ha-icon>
       <span class="grow">${text}</span>${btn}</div>`;
+  }
+
+  // you chose to skip (rain alert, the card, an action): the next cycle, or everything until a time
+  _skipRow(a) {
+    if (!a.skip_next && !a.skip_until) return "";
+    const text = a.skip_until ? `Watering skipped until ${esc(dayWord(a.skip_until))} ${hhmm(a.skip_until)}.`
+      : "The next cycle will be skipped.";
+    return `<div class="mainrow"><ha-icon icon="mdi:calendar-remove"></ha-icon><span class="grow">${text}</span>
+      ${this._canEdit() ? `<button class="act" data-act="skipcancel" title="Cycles run as scheduled again">Run as scheduled</button>` : ""}</div>`;
   }
 
   // low valve batteries: snooze the warnings (a valve that gets low later still warns)
@@ -674,6 +686,12 @@ class IrrigationSchedulerCard extends HTMLElement {
         break;
       case "snooze":
         this._call(DOMAIN, "snooze_main_water_reminders", { hours: Number(el.dataset.v), config_entry_id: cfg.entry_id });
+        break;
+      case "skipnext":
+        this._call(DOMAIN, "skip_next_cycle", { config_entry_id: cfg.entry_id });
+        break;
+      case "skipcancel":
+        this._call(DOMAIN, "skip_watering", { hours: 0, config_entry_id: cfg.entry_id });
         break;
       case "batsnooze":
         this._call(DOMAIN, "snooze_battery_warnings", { hours: Number(el.dataset.v), config_entry_id: cfg.entry_id });
@@ -982,6 +1000,7 @@ const GROUPS = {
     { name: "weather_entity", selector: S.ent(["weather"]) },
     { name: "fc_prob", selector: S.num(0, 100, 5, "%") },
     { name: "fc_mm", selector: S.num(0, 50, 0.5, "mm") },
+    { name: "fc_both", selector: S.bool },
     { name: "wind_sensor", selector: S.ent(["sensor"]) },
     { name: "wind_kmh", selector: S.num(0, 100, 1, "km/h") },
     { name: "temp_sensor", selector: S.ent(["sensor"]) },

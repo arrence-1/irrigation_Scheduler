@@ -37,6 +37,7 @@ TITLES = {
     "offline": "Valve offline",
     "battery": "Low battery",
     "battery_report": "Battery levels",
+    "skip_watering": "Skip watering",
 }
 NUMBERED = ("cycle", "reminder", "tap", "people", "main_cycle")
 # main water messages share one tag, so each replaces the one before (alert -> closed -> reminders -> open again)
@@ -45,7 +46,7 @@ MAIN_KINDS = ("main", "main_alert", "main_auto", "main_open", "main_remind", "ma
 OFFLINE_KINDS = ("offline", "offline_open", "offline_ahead", "offline_note")
 BATTERY_KINDS = ("battery", "battery_note")
 GROUPED = {**dict.fromkeys(MAIN_KINDS, "main"), **dict.fromkeys(OFFLINE_KINDS, "offline"),
-           **dict.fromkeys(BATTERY_KINDS, "battery")}
+           **dict.fromkeys(BATTERY_KINDS, "battery"), "skip_note": "skip_watering"}
 # iOS: a critical alert sounds even on silent / Do Not Disturb (the Companion app asks for this permission)
 CRITICAL = ("main_alert", "main_auto")
 TIME_SENSITIVE = ("tap", "main", "main_open", "main_remind", "main_remind_stuck", "main_cycle",

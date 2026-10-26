@@ -90,7 +90,8 @@ disabling the integration.
 `irrigation_sequencer.run_tap` (tap, minutes) · `irrigation_sequencer.close_main_water` ·
 `irrigation_sequencer.open_main_water` · `irrigation_sequencer.snooze_main_water_reminders` (hours) ·
 `irrigation_sequencer.skip_offline_tap` (tap, skip) · `irrigation_sequencer.snooze_battery_warnings` (hours) ·
-`irrigation_sequencer.send_battery_report`. *Run cycle* ignores the master / cycle switches and the weather
+`irrigation_sequencer.send_battery_report` · `irrigation_sequencer.skip_next_cycle` ·
+`irrigation_sequencer.skip_watering` (hours, 0 = run as scheduled). *Run cycle* ignores the master / cycle switches and the weather
 and soil checks (it is an explicit "run it now").
 
 ### The dashboard card
@@ -192,6 +193,12 @@ Good sensors to use:
   *Snooze…* (type hours or days: 12, 2d, 1 week); a valve that gets low later still warns. The **battery report**
   lists every valve's level every 14 days at 10:00 (pick the days, time and a first date; *Send report now* on the
   Batteries tab or `send_battery_report`).
+* **Skip watering** (*Skip next cycle* on the card, the actions, or a notification button such as a rain alert's):
+  skips the next scheduled cycle, or every cycle for some hours, and stops the running one. *Run now* still runs.
+  Phone action ids for your own notifications: `irrigation_skip_next`, `irrigation_skip_24`, `irrigation_skip`
+  (text input: hours or days).
+* **Forecast: need both** (on by default): with a forecast chance and amount both set, a cycle is skipped only when
+  both are met; a note tells you when only one was. BOM gives a range: its top is the amount (1-5 mm counts as 5).
 * **Smart checks** at each cycle start: seasonal %, hot-day boost (≤ 250 % total), rain sensor / weather /
   forecast chance / forecast mm / wind / cold skips (one switch for all), soil per tap, people guard per tap.
 * **Bypass (pressure washer).** While a tap's bypass switch is on, that tap is left alone (no timer) and cycles

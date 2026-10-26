@@ -49,6 +49,7 @@ DEFAULT_WEATHER = {
     "weather_entity": "",
     "fc_prob": 0,
     "fc_mm": 0.0,
+    "fc_both": True,  # with both forecast limits set, skip only when both are met (chance AND amount)
     "wind_sensor": "",
     "wind_kmh": 0,
     "temp_sensor": "",
@@ -247,6 +248,7 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
         "weather_entity": _str(w["weather_entity"]),
         "fc_prob": _int(w["fc_prob"], 0, 0, 100),
         "fc_mm": _float(w["fc_mm"], 0, 0, 50),
+        "fc_both": bool(w["fc_both"]),
         "wind_sensor": _str(w["wind_sensor"]),
         "wind_kmh": _float(w["wind_kmh"], 0, 0, 100),
         "temp_sensor": _str(w["temp_sensor"]),
@@ -361,6 +363,7 @@ class Cfg:
     weather_entity: str = ""
     fc_prob: int = 0
     fc_mm: float = 0
+    fc_both: bool = True
     wind_sensor: str = ""
     wind_kmh: float = 0
     temp_sensor: str = ""
@@ -413,7 +416,7 @@ def parse(options: dict[str, Any]) -> Cfg:
         people_on=p["on"], people_clear_min=p["clear_min"], people_wait_min=p["max_wait_min"],
         people_manual=p["manual"],
         wx_on=w["on"], rain_sensor=w["rain_sensor"], rain_mm=w["rain_mm"],
-        weather_entity=w["weather_entity"], fc_prob=w["fc_prob"], fc_mm=w["fc_mm"],
+        weather_entity=w["weather_entity"], fc_prob=w["fc_prob"], fc_mm=w["fc_mm"], fc_both=w["fc_both"],
         wind_sensor=w["wind_sensor"], wind_kmh=w["wind_kmh"], temp_sensor=w["temp_sensor"],
         cold_on=w["cold_on"], cold_c=w["cold_c"], boost_pct=w["boost_pct"],
         n_devices=n["devices"], n_prefix=n["prefix"], n_start_finish=n["start_finish"],

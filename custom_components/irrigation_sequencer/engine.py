@@ -113,6 +113,10 @@ class State:
     rep_anchor: str = ""  # date the battery report counts from when no start date is set
     rep_fp: str = ""  # report settings the schedule was worked out for
     rep_last: int = 0  # epoch minute of the last report occurrence handled
+    # skip watering (you chose to skip: the next cycle, or everything until a time)
+    skip_next: int = 0  # scheduled cycles still to skip
+    skip_until: float = 0.0  # skip every scheduled cycle due before this (0 = off)
+    fc_last: dict[str, Any] = field(default_factory=dict)  # last forecast check (for the status attribute)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -161,6 +165,8 @@ class State:
             st.bat_last = [int(x) for x in st.bat_last]
             st.bat_shown = bool(st.bat_shown)
             st.rep_anchor, st.rep_fp, st.rep_last = str(st.rep_anchor), str(st.rep_fp), int(st.rep_last)
+            st.skip_next, st.skip_until = max(int(st.skip_next), 0), float(st.skip_until)
+            st.fc_last = dict(st.fc_last)
             st.reminders = {str(k): [float(v[0]), float(v[1])] for k, v in dict(st.reminders).items()}
         except (TypeError, ValueError, KeyError, IndexError):
             fresh = cls()
@@ -510,6 +516,9 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
         elif was_offline and i in st.off_asked:
             msg(("offline_note", i + 1, f"{lbl(i)} is back online."))
 
+    if st.skip_until and now >= st.skip_until - 1:
+        st.skip_until = 0.0  # the skip time is over: cycles run as scheduled again
+
     # ---------- 2. due and missed cycles -> pending queue ----------
     occ_last = [last_occurrence(c, now, tz) for c in cfg.cycles]
     occ_next = [next_occurrence(c, now, tz) for c in cfg.cycles]
@@ -527,7 +536,14 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
         if lm > 0 and lm > st.handled[i]:
             st.handled[i] = lm
             if master_on and st.cycle_on[i] and cycle_has_water(cfg, i):
-                if st.cycle == i or any(p["cycle"] == i for p in st.pending):
+                if now < st.skip_until - 1 or st.skip_next > 0:
+                    # you chose to skip (e.g. from a rain alert)
+                    until = st.skip_until > now
+                    if not until:
+                        st.skip_next -= 1
+                    msg(("skip", i + 1, f"Cycle {i + 1} (due {_hm(lm * 60, tz)}) skipped: you chose to skip "
+                         + (f"watering until {_ddhm(st.skip_until, tz)}." if until else "this cycle.")))
+                elif st.cycle == i or any(p["cycle"] == i for p in st.pending):
                     msg(("cycle", i + 1, f"Cycle {i + 1} is due again while its previous run is still "
                                          "waiting or running; it will not run twice."))
                 else:
@@ -645,6 +661,8 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
             _snooze_battery(st, cfg, sn, plan, max(float(req.get("hours", 0) or 0), 0.0))
         elif kind == "battery_report":
             report_now = True
+        elif kind == "skip_watering":
+            _skip_watering(st, cfg, sn, plan, req, occ_next, close)
 
     # ---------- 4. what the valves are really doing ----------
     rv = st.tap if (st.mode in (WATERING, MANUAL, STUCK) and 0 <= st.tap < T) else -1
@@ -894,6 +912,47 @@ def reconcile(st: State, cfg: Cfg, sn: Snapshot) -> Plan:  # noqa: C901 - one ro
     return plan
 
 
+def _forecast_check(st: State, cfg: Cfg, sn: Snapshot, ci: int) -> tuple[list[str], str]:
+    """Today's forecast against the limits. Returns (skip reasons, a note when only one limit was met).
+
+    With both limits set and "both" on, a cycle is skipped only when the chance AND the amount are met;
+    otherwise each limit skips on its own. The result is kept in st.fc_last (status attribute).
+    """
+    p_on, a_on = cfg.fc_prob > 0, cfg.fc_mm > 0
+    if not (p_on or a_on) or not cfg.weather_entity:
+        return [], ""
+    f0 = sn.forecast or {}
+    prob = f0.get("precipitation_probability")
+    amt = f0.get("precipitation")
+    prob = prob if isinstance(prob, (int, float)) else None
+    amt = amt if isinstance(amt, (int, float)) else None
+    p_hit = p_on and prob is not None and prob >= cfg.fc_prob
+    a_hit = a_on and amt is not None and amt >= cfg.fc_mm
+    both = cfg.fc_both and p_on and a_on
+    shown = (f"{round(prob)}% chance" if prob is not None else "no chance given") + " of " \
+        + (f"{_g(amt)} mm" if amt is not None else "an unknown amount")
+    why: list[str] = []
+    note = ""
+    if not f0:
+        result = "no forecast"
+    elif both:
+        if p_hit and a_hit:
+            why.append(f"forecast {shown}")
+        elif p_hit or a_hit:
+            note = (f"Forecast {shown}: not skipped, both {cfg.fc_prob}% and {_g(cfg.fc_mm)} mm are needed "
+                    f"(only the {'chance' if p_hit else 'amount'} was met).")
+        result = "skipped" if why else "not skipped"
+    else:
+        if p_hit:
+            why.append(f"forecast {round(prob)}% chance of rain")
+        if a_hit:
+            why.append(f"forecast {_g(amt)} mm of rain")
+        result = "skipped" if why else "not skipped"
+    st.fc_last = {"at": sn.now, "cycle": ci + 1, "chance": prob, "amount": amt, "result": result,
+                  "rule": "both" if both else "either"}
+    return why, note
+
+
 def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
     """Pop the first pending cycle: run the weather / seasonal / soil checks, start or skip it."""
     msg = plan.msgs.append
@@ -909,18 +968,14 @@ def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
 
     # rain & weather skip: collect every reason (an empty setting is off)
     why: list[str] = []
+    fc_note = ""
     if cfg.wx_on and not forced:
         if cfg.rain_sensor and (sn.rain_state == "on" or (sn.rain_value is not None and sn.rain_value >= cfg.rain_mm)):
             why.append("rain sensor " + ("reports rain" if sn.rain_state == "on" else f"at {_g(sn.rain_value or 0)} mm"))
         if cfg.weather_entity and sn.weather_state in WET_WEATHER:
             why.append("weather is " + sn.weather_state.replace("-", " "))
-        f0 = sn.forecast or {}
-        prob = f0.get("precipitation_probability")
-        if cfg.fc_prob > 0 and isinstance(prob, (int, float)) and prob >= cfg.fc_prob:
-            why.append(f"forecast {round(prob)}% chance of rain")
-        amt = f0.get("precipitation")
-        if cfg.fc_mm > 0 and isinstance(amt, (int, float)) and amt >= cfg.fc_mm:
-            why.append(f"forecast {_g(amt)} mm of rain")
+        fc_why, fc_note = _forecast_check(st, cfg, sn, ci)
+        why += fc_why
         if cfg.wind_kmh > 0 and sn.wind is not None and sn.wind >= cfg.wind_kmh:
             why.append(f"wind {_g(round(sn.wind, 1))} km/h")
         if cfg.cold_on and sn.temp is not None and sn.temp <= cfg.cold_c:
@@ -1014,6 +1069,8 @@ def _start_next_pending(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> None:
                           "those taps run in tap-number order."))
     if soil_wet:
         msg(("skip", ci + 1, f"Skipped {', '.join(soil_wet)}."))
+    if fc_note:  # the forecast met one limit but not both: say so, so the "both" rule can be checked
+        msg(("cycle", ci + 1, fc_note))
     if off_skipped:
         msg(("skip", ci + 1, f"Skipped while offline: {', '.join(off_skipped)}."))
     if over:
@@ -1108,6 +1165,62 @@ def _pick_next(st: State, cfg: Cfg, sn: Snapshot, plan: Plan) -> bool:
     _reset_cycle(st, T)
     st.mode, st.tap, st.end = IDLE, -1, 0.0
     return True
+
+
+def _skip_watering(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, req: dict[str, Any], occ_next: list[float],
+                   close: Any) -> None:
+    """You chose to skip watering (e.g. a rain alert's button): the next cycle, for some hours, or run again.
+
+    req: {"next": True} = skip the next cycle (the running or waiting one if there is one),
+    {"hours": h} = skip every scheduled cycle due in the next h hours (and stop the running one),
+    {"hours": 0} = cancel any skip. "Run now" cycles are never skipped.
+    """
+    msg = plan.msgs.append
+    now, tz = sn.now, sn.tz
+    T = len(cfg.taps)
+    hm = _hm(now, tz)
+    hours = max(float(req.get("hours", 0) or 0), 0.0)
+    nxt = bool(req.get("next"))
+    if not nxt and hours <= 0:  # run as scheduled again
+        was = st.skip_next > 0 or st.skip_until > now
+        st.skip_next, st.skip_until = 0, 0.0
+        msg(("skip_note", 0, "Skipping cancelled: cycles run as scheduled again." if was
+             else "Nothing is being skipped: cycles run as scheduled."))
+        return
+    stopped = []
+    if st.cycle >= 0 and not st.forced:
+        if st.mode == WATERING:
+            close(st.tap)
+        stopped.append(st.cycle)
+        _reset_cycle(st, T)
+        if st.mode in (WATERING, GAP):
+            st.mode, st.tap, st.end = IDLE, -1, 0.0
+    keep = []
+    for p in st.pending:
+        if p["forced"]:
+            keep.append(p)
+        else:
+            stopped.append(p["cycle"])
+    st.pending = keep
+    done = f"Cycle {', '.join(str(c + 1) for c in stopped)} stopped at {hm}. " if stopped else ""
+    if hours > 0:
+        st.skip_until, st.skip_next = now + hours * 3600, 0
+        msg(("skip_note", 0, f"{done}Watering skipped for {_dur(hours * 3600)}, until {_ddhm(st.skip_until, tz)}: "
+                             "cycles due before then are skipped."
+             + ("" if st.master else " (The master switch is off, so nothing runs anyway.)")))
+        return
+    if stopped:
+        msg(("skip_note", 0, f"{done}It counts as the skipped cycle; the next ones run as scheduled."))
+        return
+    st.skip_next = 1
+    cands = [(o, i) for i, o in enumerate(occ_next) if o > 0 and st.cycle_on[i] and cycle_has_water(cfg, i)]
+    if cands:
+        o, i = min(cands)
+        what = f"Cycle {i + 1}, {_ddhm(o, tz)}"
+    else:
+        what = "none is scheduled yet"
+    msg(("skip_note", 0, f"The next cycle ({what}) will be skipped."
+         + ("" if st.master else " (The master switch is off, so nothing runs anyway.)")))
 
 
 def _offline_hold(st: State, cfg: Cfg, sn: Snapshot, plan: Plan, waiting: list[int]) -> bool:
@@ -1493,6 +1606,8 @@ def next_wake(st: State, cfg: Cfg, sn: Snapshot, occ_next: list[float] | None = 
                 cands += [o - 1200, o - 600]
     if st.hot_since and not st.hot_alerted:
         cands.append(st.hot_since + HOT_FOR_S)
+    if st.skip_until > now:
+        cands.append(st.skip_until)
     if st.off_wait and st.cycle >= 0:
         cands.append(st.off_wait + max(cfg.off_wait_min, 1) * 60)
     if cfg.off_ask_ahead and st.master and offline_blockers(st, cfg, sn):

@@ -471,7 +471,7 @@ def test_cycle_end_estimate_with_a_manual_run_in_the_middle():
 # Weather, soil, hot-day boost
 # --------------------------------------------------------------------------
 WX = {"rain_sensor": "sensor.rain", "rain_mm": 5, "weather_entity": "weather.home", "fc_prob": 60,
-      "fc_mm": 3, "wind_sensor": "sensor.wind", "wind_kmh": 30, "temp_sensor": "sensor.temp",
+      "fc_mm": 3, "fc_both": False, "wind_sensor": "sensor.wind", "wind_kmh": 30, "temp_sensor": "sensor.temp",
       "cold_on": True, "cold_c": 2}
 
 
@@ -1319,3 +1319,113 @@ def test_battery_report_layout_low_offline_and_no_next_line_when_off():
     w.at(f"{DAY} 12:03", w.request({"type": "battery_report"}))
     w.run_until(f"{DAY} 12:05")
     assert w.texts("battery_report") == ["Lowest: Tap 2 12% (low)\n\nTap 1 45%\nTap 2 12% (low)\nTap 3 80% (offline)"]
+
+
+
+# --------------------------------------------------------------------------
+# Forecast: both the chance and the amount (1.6.0); skip watering on request
+# --------------------------------------------------------------------------
+FC = {"weather_entity": "weather.home", "fc_prob": 70, "fc_mm": 5}  # fc_both is on by default
+
+
+@pytest.mark.parametrize(
+    ("forecast", "skipped", "text"),
+    [
+        ({"precipitation_probability": 95, "precipitation": 20}, True, "skipped: forecast 95% chance of 20 mm."),
+        ({"precipitation_probability": 70, "precipitation": 5}, True, "skipped: forecast 70% chance of 5 mm."),
+        ({"precipitation_probability": 70, "precipitation": 1}, False,
+         "Forecast 70% chance of 1 mm: not skipped, both 70% and 5 mm are needed (only the chance was met)."),
+        ({"precipitation_probability": 30, "precipitation": 9}, False,
+         "Forecast 30% chance of 9 mm: not skipped, both 70% and 5 mm are needed (only the amount was met)."),
+        ({"precipitation_probability": 20, "precipitation": 0}, False, None),
+    ],
+)
+def test_forecast_needs_both_chance_and_amount(forecast, skipped, text):
+    o = cyc(opts(2, 1, weather=FC), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.forecast = forecast
+    w.run_until(f"{DAY} 06:10")
+    assert (w.log == []) is skipped, w.dump()
+    msgs = w.texts("skip") + w.texts("cycle")
+    if text:
+        assert any(text in m for m in msgs), msgs
+    fc = w.state.fc_last
+    assert fc["rule"] == "both" and fc["result"] == ("skipped" if skipped else "not skipped") and fc["cycle"] == 1
+    assert fc["chance"] == forecast["precipitation_probability"] and fc["amount"] == forecast["precipitation"]
+
+
+def test_forecast_one_limit_set_still_skips_on_its_own_and_no_forecast_is_noted():
+    o = cyc(opts(2, 1, weather={**FC, "fc_mm": 0}), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.forecast = {"precipitation_probability": 80, "precipitation": 0.2}
+    w.run_until(f"{DAY} 06:10")
+    assert w.log == [] and "forecast 80% chance of rain" in w.texts("skip")[0]
+    assert w.state.fc_last["rule"] == "either"
+    o = cyc(opts(2, 1, weather=FC), 0, "06:00", [1, 1])
+    w = world(o, f"{DAY} 05:50")
+    w.forecast = None  # the forecast couldn't be fetched
+    w.run_until(f"{DAY} 06:10")
+    assert w.order() == ["T1", "T2"] and w.state.fc_last["result"] == "no forecast"
+
+
+def two_cycles() -> dict:
+    o = cyc(opts(2, 2), 0, "06:00", [1, 1])
+    return cyc(o, 1, "18:00", [1, 1])
+
+
+def test_skip_next_cycle_skips_only_the_next_one():
+    w = world(two_cycles(), f"{DAY} 05:00")
+    w.at(f"{DAY} 05:10", w.request({"type": "skip_watering", "next": True}))
+    w.run_until(f"{DAY} 18:10")
+    assert w.texts("skip_note") == ["The next cycle (Cycle 1, Mon 12 Oct 06:00) will be skipped."]
+    assert "Cycle 1 (due 06:00) skipped: you chose to skip this cycle." in w.texts("skip")
+    assert w.on_periods(0)[0][0] == ts(f"{DAY} 18:00")  # cycle 2 runs as usual
+    assert w.state.skip_next == 0
+
+
+def test_skip_for_hours_skips_every_cycle_then_runs_again():
+    w = world(two_cycles(), f"{DAY} 05:00")
+    w.at(f"{DAY} 05:10", w.request({"type": "skip_watering", "hours": 24}))
+    w.run_until("2026-10-13 06:10")
+    assert w.texts("skip_note") == ["Watering skipped for 1 day, until Tue 13 Oct 05:10: cycles due before then are "
+                                    "skipped."]
+    skips = [t for t in w.texts("skip") if "you chose to skip" in t]
+    assert skips == ["Cycle 1 (due 06:00) skipped: you chose to skip watering until Tue 13 Oct 05:10.",
+                     "Cycle 2 (due 18:00) skipped: you chose to skip watering until Tue 13 Oct 05:10."]
+    assert w.on_periods(0)[0][0] == ts("2026-10-13 06:00") and w.state.skip_until == 0.0
+
+
+def test_skip_stops_the_running_cycle_and_run_now_is_never_skipped():
+    w = world(two_cycles(), f"{DAY} 05:50")
+    w.at(f"{DAY} 06:00:30", w.request({"type": "skip_watering", "next": True}))
+    w.run_until(f"{DAY} 06:10")
+    assert w.log == [(ts(f"{DAY} 06:00"), "T1 on"), (ts(f"{DAY} 06:00:30"), "T1 off")], w.log
+    assert w.texts("skip_note") == ["Cycle 1 stopped at 06:00. It counts as the skipped cycle; the next ones run as "
+                                    "scheduled."]
+    assert w.state.cycle == -1 and w.state.skip_next == 0
+    w.at(f"{DAY} 07:00", w.request({"type": "skip_watering", "hours": 24}))
+    w.at(f"{DAY} 07:01", w.request({"type": "run_cycle", "cycle": 0}))
+    w.run_until(f"{DAY} 07:10")
+    assert w.on_periods(0)[-1][0] == ts(f"{DAY} 07:01")  # Run now still runs
+    assert_never_two(w)
+
+
+def test_skip_cancel_runs_as_scheduled_again():
+    w = world(two_cycles(), f"{DAY} 05:00")
+    w.at(f"{DAY} 05:10", w.request({"type": "skip_watering", "next": True}))
+    w.at(f"{DAY} 05:20", w.request({"type": "skip_watering", "hours": 0}))
+    w.at(f"{DAY} 05:30", w.request({"type": "skip_watering", "hours": 0}))
+    w.run_until(f"{DAY} 06:10")
+    assert w.texts("skip_note")[1:] == ["Skipping cancelled: cycles run as scheduled again.",
+                                        "Nothing is being skipped: cycles run as scheduled."]
+    assert w.on_periods(0)[0][0] == ts(f"{DAY} 06:00")
+
+
+def test_skip_survives_a_restart():
+    w = world(two_cycles(), f"{DAY} 05:00")
+    stop, start = w.restart()
+    w.at(f"{DAY} 05:10", w.request({"type": "skip_watering", "next": True}))
+    w.at(f"{DAY} 05:20", stop)
+    w.at(f"{DAY} 05:25", start)
+    w.run_until(f"{DAY} 06:10")
+    assert w.log == [] and any("you chose to skip this cycle" in t for t in w.texts("skip"))

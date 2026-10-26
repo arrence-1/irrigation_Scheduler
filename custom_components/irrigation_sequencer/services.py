@@ -21,8 +21,10 @@ from .const import (
     SERVICE_OPEN_MAIN,
     SERVICE_RUN_CYCLE,
     SERVICE_RUN_TAP,
+    SERVICE_SKIP_NEXT,
     SERVICE_SKIP_OFFLINE,
     SERVICE_SKIP_TAP,
+    SERVICE_SKIP_WATERING,
     SERVICE_SNOOZE_BATTERY,
     SERVICE_SNOOZE_MAIN,
     SERVICE_STOP,
@@ -48,6 +50,8 @@ SCHEMAS = {
     }),
     SERVICE_SNOOZE_BATTERY: vol.Schema({**BASE, vol.Required("hours"): vol.All(vol.Coerce(float), vol.Range(min=0, max=720))}),
     SERVICE_BATTERY_REPORT: vol.Schema(BASE),
+    SERVICE_SKIP_NEXT: vol.Schema(BASE),
+    SERVICE_SKIP_WATERING: vol.Schema({**BASE, vol.Required("hours"): vol.All(vol.Coerce(float), vol.Range(min=0, max=168))}),
     SERVICE_RUN_TAP: vol.Schema(
         {
             **BASE,
@@ -101,6 +105,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             coord.request("service", {"type": "snooze_battery", "hours": call.data["hours"]})
         elif call.service == SERVICE_BATTERY_REPORT:
             coord.request("service", {"type": "battery_report"})
+        elif call.service == SERVICE_SKIP_NEXT:
+            coord.request("service", {"type": "skip_watering", "next": True})
+        elif call.service == SERVICE_SKIP_WATERING:
+            coord.request("service", {"type": "skip_watering", "hours": call.data["hours"]})
         elif call.service == SERVICE_SKIP_TAP:
             t = call.data["tap"]
             if t > T:
